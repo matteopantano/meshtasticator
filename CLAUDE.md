@@ -1,0 +1,94 @@
+# Meshtasticator - Docker Architecture & Setup Documentation
+
+This document explains the architecture, issues encountered, solutions applied, and instructions for running `meshtasticd` alongside `meshtastic-web` using Docker Compose.
+
+---
+
+## 1. System Architecture Overview
+
+The system consists of three main components defined in `docker-compose.yaml`:
+
+```
+┌───────────────────────────────┐       HTTP (Static Files)     ┌──────────────────────────────────┐
+│  Host Browser                 │ <───────────────────────────> │  meshtastic-web (NGINX:8080)     │
+│  (http://localhost:8080)      │                               │  - Serves static Web App         │
+│                               │       CORS / REST / WS        │  - Reverse-proxies /api/v1/      │
+│                               │ <───────────────────────────> └─────────────────┬────────────────┘
+└───────────────┬───────────────┘                                                 │
+                │                                                                 │
+                └─────────────────────────┐                                       │
+                                          ▼                                       ▼
+                               ┌─────────────────────────────────────────────────────┐
+                               │  ws-proxy (Python / Tornado on port 4403)           │
+                               │  - Handles CORS preflights (OPTIONS, GET, POST, PUT)│
+                               │  - Manages HTTP polling queue (/api/v1/fromradio)  │
+                               │  - Bridges WebSockets (/api/v1/ws)                  │
+                               │  - Strips/Appends 4-byte TCP Header (0x94 0xc3 len)  │
+                               └──────────────────────────┬──────────────────────────┘
+                                                          │
+                                                          │ Raw TCP (Port 4403)
+                                                          ▼
+                               ┌─────────────────────────────────────────────────────┐
+                               │  meshtasticd (Meshtastic C++ Daemon)                │
+                               │  - Simulated radio node (-s)                        │
+                               │  - Port 4404 exposed for Python CLI management      │
+                               └─────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2. Root Cause Analysis & Technical Solutions
+
+### Problem 1: Protocol & Security Mismatch (Raw TCP vs Browser WebSockets/HTTP)
+- **Root Cause**: `meshtasticd` exposes port `4403` as a **raw TCP binary socket**. Web browsers executing JavaScript (`meshtastic-web`) cannot open raw TCP sockets due to browser security sandboxing; they require WebSockets (`ws://`) or HTTP REST calls.
+- **Solution**: Implemented `ws-proxy` using Python Tornado. It accepts WebSocket upgrades and HTTP requests on port `4403` and bridges them to `meshtasticd`'s TCP socket.
+
+### Problem 2: TCP Packet Framing (`0x94 0xc3 <length>`)
+- **Root Cause**: `meshtasticd`'s TCP stream expects and sends every Protobuf packet with a **4-byte header**:
+  - Byte 0: `0x94` (`START1`)
+  - Byte 1: `0xc3` (`START2`)
+  - Bytes 2-3: `length` (2-byte big-endian integer)
+  - Bytes 4+: Raw `FromRadio` or `ToRadio` Protobuf payload.
+  
+  `meshtastic-web` expects and sends **unframed** Protobuf payloads over WebSockets/HTTP.
+- **Solution**: `proxy.py` parses and strips the 4-byte header from incoming `meshtasticd` TCP packets before sending to the browser, and prepends the 4-byte header to outgoing browser messages before writing to `meshtasticd`.
+
+### Problem 3: CORS & Preflight (`OPTIONS` and `PUT` methods)
+- **Root Cause**: `meshtastic-web` uses `PUT /api/v1/toradio` and CORS preflight `OPTIONS` requests. Browsers block requests if `PUT` is missing from `Access-Control-Allow-Methods`.
+- **Solution**: Added explicit `PUT`, `POST`, `GET`, `OPTIONS`, `DELETE`, `PATCH` CORS handlers in `proxy.py` returning `204 No Content` with `Access-Control-Allow-Origin: *`.
+
+### Problem 4: HTTP Polling vs WebSocket Streaming Queue
+- **Root Cause**: `meshtastic-web` uses HTTP REST polling (`GET /api/v1/fromradio`) during initialization. Returning an empty HTTP response caused the UI to get stuck on a loading spinner.
+- **Solution**: Added an asynchronous queue in `proxy.py`. A persistent background loop reads `FromRadio` packets from `meshtasticd` and feeds both the HTTP polling queue and active WebSockets.
+
+### Problem 5: LoRa Region Uninitialized (`UNSET`)
+- **Root Cause**: `meshtasticd` defaults to `region: UNSET`. When unconfigured, Meshtastic nodes block packet transmissions and config downloads.
+- **Solution**: Set `Region: US` in `meshtasticd-config/config.yaml` and exposed port `4404` for direct CLI configuration using `meshtastic --host localhost:4404 --set lora.region US`.
+
+---
+
+## 3. Configuration Files
+
+- [`docker-compose.yaml`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/docker-compose.yaml): Services definition (`meshtasticd`, `ws-proxy`, `web`).
+- [`meshtasticd-config/config.yaml`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/meshtasticd-config/config.yaml): Daemon config setting `MACAddressSource: generate` and `Lora.Region: US`.
+- [`meshtasticd-config/nginx.conf`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/meshtasticd-config/nginx.conf): NGINX configuration for `meshtastic-web` reverse-proxying `/api/v1/` to `ws-proxy:4403`.
+- [`meshtasticd-config/proxy.py`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/meshtasticd-config/proxy.py): Tornado proxy bridging CORS, REST API, WebSockets, and TCP header framing.
+
+---
+
+## 4. How to Run
+
+1. **Start the containers**:
+   ```bash
+   docker compose up -d
+   ```
+
+2. **Open the Web UI**:
+   Navigate to **`http://localhost:8080`** (or `http://127.0.0.1:8080`) in your browser.
+
+3. **CLI Management (Optional)**:
+   You can manage the simulated daemon using the Python CLI via port 4404:
+   ```bash
+   .venv/bin/meshtastic --host localhost:4404 --info
+   .venv/bin/meshtastic --host localhost:4404 --set lora.region US
+   ```

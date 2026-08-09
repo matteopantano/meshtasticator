@@ -1,0 +1,5 @@
+General:
+  MACAddressSource: generate
+
+Lora:
+  Region: US

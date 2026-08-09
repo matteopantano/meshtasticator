@@ -1,0 +1,43 @@
+services:
+  meshtasticd:
+    image: meshtastic/meshtasticd:latest
+    container_name: meshtasticd
+    restart: unless-stopped
+    command: ["meshtasticd", "-s", "-e", "-c", "/etc/meshtasticd/config.yaml"]
+    volumes:
+      - ./meshtasticd-config/config.yaml:/etc/meshtasticd/config.yaml:ro
+    ports:
+      - "4404:4403"
+    networks:
+      - meshtastic
+
+  ws-proxy:
+    image: python:3.11-slim
+    container_name: meshtastic-ws-proxy
+    restart: unless-stopped
+    command: sh -c "pip install tornado && python /app/proxy.py"
+    volumes:
+      - ./meshtasticd-config/proxy.py:/app/proxy.py:ro
+    ports:
+      - "4403:4403"
+    depends_on:
+      - meshtasticd
+    networks:
+      - meshtastic
+
+  web:
+    image: ghcr.io/meshtastic/web:latest
+    container_name: meshtastic-web
+    restart: unless-stopped
+    volumes:
+      - ./meshtasticd-config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      - meshtasticd
+      - ws-proxy
+    networks:
+      - meshtastic
+
+networks:
+  meshtastic:

@@ -48,3 +48,23 @@ nodeLanguageServer/**
 nodeLanguageServer.*/**
 dist/**
 program
+
+# Secrets, Environment & Credentials
+.env
+.env.*
+*.env
+*.key
+*.psk
+*.crt
+*.pfx
+*.p12
+secrets.*
+*.secrets.*
+mosquitto/config/passwd
+mosquitto/data/
+mosquitto/log/
+config.local.yaml
+*.local.yaml
+*.local.json
+instructions.txt
+

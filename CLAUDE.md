@@ -92,3 +92,39 @@ The system consists of three main components defined in `docker-compose.yaml`:
    .venv/bin/meshtastic --host localhost:4404 --info
    .venv/bin/meshtastic --host localhost:4404 --set lora.region US
    ```
+
+---
+
+## 5. Planned MQTT & Shelly Smart Relay Integration
+
+Full details, JSON payload schemas, security specs, and simulation steps are preserved in [`MQTT_SHELLY_SIMULATION.md`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/MQTT_SHELLY_SIMULATION.md).
+
+### Quick Architecture Summary:
+- **Radio Link Encryption**: AES-256-CTR over dedicated secondary private channel (`HomeControl`).
+- **Data Payload**: Compact JSON over `SERIAL_APP` / `TEXT_MESSAGE_APP` containing `ver`, `target`, `action`, `seq`, `sig`.
+- **Security & Authorization**: Gateway checks sender Node ID whitelist, verifies `HMAC-SHA256(CONTROL_SECRET, ...)` signature, and enforces monotonic `seq` to prevent replay attacks.
+- **Shelly MQTT Integration**: Gateway publishes to Shelly MQTT topics (`shellies/shelly1-<id>/relay/0/command` or Gen2 RPC) and forwards status ACK back over LoRa.
+- **Simulation Steps**:
+  1. Add `mqtt-broker` (eclipse-mosquitto) to `docker-compose.yaml`.
+  2. Implement `meshtasticd-config/mqtt_bridge.py` for gateway logic.
+  3. Implement `meshtasticd-config/shelly_simulator.py` for smart relay simulation.
+  4. Execute `meshtasticd-config/send_control_cmd.py` to test end-to-end command & status feedback loop.
+
+---
+
+## 6. Public Repository Security & Secrets Prevention Rules
+
+> [!IMPORTANT]
+> **This repository is public.** Under NO circumstances should real secrets, private keys, or sensitive credentials be committed or pushed.
+
+### Strict Security Rules:
+1. **No Real Cryptographic Keys or PSKs**:
+   - In sample configs, code examples, or test scripts, always use generic placeholders (e.g. `"YOUR_HMAC_SECRET_KEY"`, `"YOUR_BASE64_AES256_PSK_KEY=="`) or load them dynamically from environment variables.
+2. **No Real Network Credentials**:
+   - Never commit Wi-Fi SSIDs/passwords, real MQTT broker user/password credentials, or private server endpoints.
+3. **Environment Variable & `.env` Isolation**:
+   - Keep actual keys and local passwords in `.env` or `config.local.yaml` (both excluded in `.gitignore`).
+4. **Git Status & Pre-commit Verification**:
+   - Always run `git status` and verify changes before committing to ensure no unintended data files, credentials, or logs are staged.
+
+

@@ -52,6 +52,7 @@ program
 # Secrets, Environment & Credentials
 .env
 .env.*
+!.env.example
 *.env
 *.key
 *.psk

@@ -1,43 +1,100 @@
 services:
-  meshtasticd:
+  # ============================================================
+  # RX (Receiver / Gateway) Node
+  # ============================================================
+  meshtasticd-rx:
     image: meshtastic/meshtasticd:latest
-    container_name: meshtasticd
+    container_name: meshtasticd-rx
     restart: unless-stopped
-    command: ["meshtasticd", "-s", "-e", "-c", "/etc/meshtasticd/config.yaml"]
+    command: ["meshtasticd", "-s", "-c", "/etc/meshtasticd/config.yaml"]
     volumes:
       - ./meshtasticd-config/config.yaml:/etc/meshtasticd/config.yaml:ro
-    ports:
-      - "4404:4403"
+      - meshtasticd-data-rx:/root/.portduino
     networks:
       - meshtastic
 
-  ws-proxy:
+  ws-proxy-rx:
     image: python:3.11-slim
-    container_name: meshtastic-ws-proxy
+    container_name: meshtastic-ws-proxy-rx
     restart: unless-stopped
-    command: sh -c "pip install tornado && python /app/proxy.py"
+    environment:
+      - MESHTASTIC_HOST=meshtasticd-rx
+      - MESHTASTIC_PORT=4403
+    command: sh -c "pip install tornado && python -u /app/proxy.py"
     volumes:
       - ./meshtasticd-config/proxy.py:/app/proxy.py:ro
     ports:
       - "4403:4403"
+      - "4404:4404"
     depends_on:
-      - meshtasticd
+      - meshtasticd-rx
     networks:
       - meshtastic
 
+  # ============================================================
+  # TX (Transmitter / Remote) Node
+  # ============================================================
+  meshtasticd-tx:
+    image: meshtastic/meshtasticd:latest
+    container_name: meshtasticd-tx
+    restart: unless-stopped
+    command: ["meshtasticd", "-s", "-c", "/etc/meshtasticd/config.yaml"]
+    volumes:
+      - ./meshtasticd-config/config.yaml:/etc/meshtasticd/config.yaml:ro
+      - meshtasticd-data-tx:/root/.portduino
+    networks:
+      - meshtastic
+
+  ws-proxy-tx:
+    image: python:3.11-slim
+    container_name: meshtastic-ws-proxy-tx
+    restart: unless-stopped
+    environment:
+      - MESHTASTIC_HOST=meshtasticd-tx
+      - MESHTASTIC_PORT=4403
+    command: sh -c "pip install tornado && python -u /app/proxy.py"
+    volumes:
+      - ./meshtasticd-config/proxy.py:/app/proxy.py:ro
+    ports:
+      - "4405:4403"
+      - "4406:4404"
+    depends_on:
+      - meshtasticd-tx
+    networks:
+      - meshtastic
+
+  # ============================================================
+  # Unified Web UI Frontend
+  # ============================================================
   web:
     image: ghcr.io/meshtastic/web:latest
     container_name: meshtastic-web
     restart: unless-stopped
-    volumes:
-      - ./meshtasticd-config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "8080:8080"
     depends_on:
-      - meshtasticd
-      - ws-proxy
+      - meshtasticd-rx
+      - ws-proxy-rx
     networks:
       - meshtastic
+
+  # ============================================================
+  # MQTT Broker (Mosquitto)
+  # ============================================================
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto-broker
+    restart: unless-stopped
+    volumes:
+      - ./meshtasticd-config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+    networks:
+      - meshtastic
+
+volumes:
+  meshtasticd-data-rx:
+  meshtasticd-data-tx:
 
 networks:
   meshtastic:

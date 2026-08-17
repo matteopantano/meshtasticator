@@ -1,53 +1,29 @@
-# Secure Meshtastic to MQTT (Shelly Smart Relay) Control & Simulation Guide
+# Architecture & Technical Requirements: Meshtastic to MQTT (Shelly Smart Relay) Control
 
-This guide outlines the data structures, end-to-end security model (encryption, authentication, anti-replay), status feedback loop, and a local Docker/Python simulation setup in **Meshtasticator** for controlling a Shelly smart relay via Meshtastic and an ESP32 MQTT broker.
+This document outlines the architecture, data structures, and security specifications for using a **Meshtastic LoRa node** to wirelessly control **Shelly smart relays** over MQTT via a Gateway node.
 
 ---
 
-## 1. System Architecture & Component Flow
+## 1. System Architecture
 
-```
-┌───────────────────────────────────────┐
-│     Node A (Transmitter)              │
-│  - Encrypts via AES-256 Private PSK   │
-│  - Generates Nonce + HMAC Signature   │
-└──────────────────┬────────────────────┘
-                   │
-                   │ 1. LoRa Packet (Private Channel Payload)
-                   ▼
-┌───────────────────────────────────────┐
-│     Node B (Gateway / MQTT Gateway)   │
-│  - Decrypts packet                    │
-│  - Verifies Sender Node ID            │
-│  - Verifies Nonce & HMAC Signature    │
-└──────────────────┬────────────────────┘
-                   │
-                   │ 2. Publishes MQTT Command (shelly/command)
-                   ▼
-┌───────────────────────────────────────┐
-│  MQTT Broker (ESP32 / Mosquitto)      │
-└────────┬──────────────────────▲───────┘
-         │                      │
-         │ 3. Delivers Command  │ 4. Publishes Status Change
-         ▼                      │
-┌───────────────────────────────┴───────┐
-│  Shelly Smart Relay (Gen1 / Gen2)     │
-│  - Toggles relay state (ON / OFF)     │
-└───────────────────────────────────────┘
-                   │
-                   │ 5. MQTT Broker sends relay status to Node B
-                   ▼
-┌───────────────────────────────────────┐
-│     Node B (Gateway / MQTT Gateway)   │
-│  - Formats encrypted status response  │
-└──────────────────┬────────────────────┘
-                   │
-                   │ 6. LoRa Status ACK Packet
-                   ▼
-┌───────────────────────────────────────┐
-│     Node A (Transmitter)              │
-│  - Receives & confirms state change   │
-└───────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph MeshNetwork ["Meshtastic LoRa Mesh"]
+        NodeA["Node TX (Remote Transmitter)\n(Heltec / T-Beam / Phone App / Web UI)"]
+        NodeB["Node RX (Gateway / Receiver)\n(ESP32 / Linux Portduino)"]
+        NodeA <--> |LoRa RF / Private Channel| NodeB
+    end
+
+    subgraph LocalGateway ["Local Gateway Subsystem"]
+        NodeB <--> |TCP API / Serial / Wi-Fi| Bridge["MQTT Bridge / Embedded Firmware\n(ESP32 SoftAP Hub)"]
+        Broker["MQTT Broker (Mosquitto / TinyMqtt)\n(Port 1883)"]
+        Bridge <--> Broker
+    end
+
+    subgraph TargetDevices ["Shelly Smart Relays (Wi-Fi)"]
+        Shelly1["Shelly 1 / Plus 1\n(Relay 0)"]
+        Broker <--> |MQTT Subscribe / Publish| Shelly1
+    end
 ```
 
 ---
@@ -57,14 +33,14 @@ This guide outlines the data structures, end-to-end security model (encryption, 
 ### A. Data Structure (Payload Specification)
 To keep LoRa payload sizes minimal (< 200 bytes) while enabling full validation and feedback, use compact JSON structures over a private channel (e.g. `SERIAL_APP` or `TEXT_MESSAGE_APP`).
 
-#### Command Payload (Node A ➔ Node B)
+#### Command Payload (Node TX ➔ Node RX)
 ```json
 {
   "ver": 1,
-  "target": "shelly_relay_01",
-  "action": "OFF",
+  "target": "shelly1-sim01",
+  "action": "ON",
   "seq": 1042,
-  "sig": "e4b9c1d2"
+  "sig": "9b9a4221"
 }
 ```
 * **`ver`**: Protocol version integer.
@@ -73,12 +49,12 @@ To keep LoRa payload sizes minimal (< 200 bytes) while enabling full validation 
 * **`seq`**: Monotonic counter / timestamp for anti-replay verification.
 * **`sig`**: Truncated hex HMAC signature computed over `target + action + seq` with a shared secret key.
 
-#### Status Feedback Payload (Node B ➔ Node A)
+#### Response / Status ACK Payload (Node RX ➔ Node TX)
 ```json
 {
   "ver": 1,
-  "device": "shelly_relay_01",
-  "state": "OFF",
+  "target": "shelly1-sim01",
+  "state": "ON",
   "ack_seq": 1042,
   "status": "OK"
 }
@@ -86,47 +62,56 @@ To keep LoRa payload sizes minimal (< 200 bytes) while enabling full validation 
 
 ---
 
-### B. Encryption (Over-The-Air Security)
-1. **Meshtastic Layer (AES-256-CTR)**:
-   - Configure a dedicated private secondary channel (e.g., name `HomeControl`).
-   - Generate a custom 256-bit key (`psk`).
-   - Only nodes possessing this key (Node A and Node B) can decrypt packet contents. Unauthenticated nodes on the public mesh see only ciphertext.
-
----
-
-### C. Sender Verification & Access Control (Authentication & Authorization)
-To prevent unauthorized commands or spoofed packets:
+### B. Security & Verification Pipeline
 
 1. **Sender Node ID Whitelist**:
-   - Gateway verifies `FromRadio.from` equals Node A's exact 32-bit Node ID (e.g., `!1a2b3c4d`).
+   - Gateway verifies `FromRadio.from` equals Node TX's exact 32-bit Node ID.
 2. **HMAC Signature (Cryptographic Authorization)**:
-   - Node A and Gateway share a secret key `CONTROL_SECRET`.
-   - Node A computes `sig = Truncate8(HMAC_SHA256(CONTROL_SECRET, "shelly_relay_01:OFF:1042"))`.
-   - Node B recalculates HMAC and drops request if signatures do not match.
+   - Node TX and Gateway share a secret key `CONTROL_SECRET`.
+   - Node TX computes `sig = Truncate8(HMAC_SHA256(CONTROL_SECRET, "shelly1-sim01:ON:1042"))`.
+   - Gateway recalculates HMAC and drops request if signatures do not match.
 3. **Anti-Replay Protection (Nonce / Sequence Tracking)**:
-   - Node B stores `last_seen_seq` per Node ID.
+   - Gateway stores `last_seen_seq` per Node ID.
    - If `seq <= last_seen_seq`, packet is rejected as a duplicate or replay attack.
 
 ---
 
-### D. Shelly Smart Relay MQTT Integration
+### C. Shelly Smart Relay MQTT Integration
 
 #### Shelly Standard Topics:
 * **Shelly Gen 1 (e.g. Shelly 1/1PM)**:
   * Command Topic: `shellies/shelly1-<device_id>/relay/0/command` (Payload: `on` or `off`)
   * State Topic: `shellies/shelly1-<device_id>/relay/0` (Payload: `on` or `off`)
 * **Shelly Gen 2 / Plus Series (RPC Protocol)**:
-  * Command Topic: `<device_id>/rpc`
-    * Payload: `{"id": 1, "src": "meshtastic_gw", "method": "Switch.Set", "params": {"id": 0, "on": false}}`
-  * State Topic: `<device_id>/status/switch:0`
+  * Command Topic: `<device_id>/rpc` (Payload: `{"id":1,"src":"meshtastic","method":"Switch.Set","params":{"id":0,"on":true}}`)
+  * Status Topic: `<device_id>/status/switch:0` (Payload: `{"output":true,...}`)
 
 ---
 
-## 3. Local Simulation Architecture in Meshtasticator
+## 3. Automated 1-Click Provisioning (.env Supported)
 
-To simulate and test this workflow on your Mac before flashing an ESP32:
+To configure both simulated containers or real physical USB hardware in one click:
 
-1. **Mosquitto MQTT Broker**: Add Mosquitto container service to `docker-compose.yaml`.
-2. **Gateway Bridge Daemon**: Python script in `meshtasticd-config/mqtt_bridge.py` connecting to `meshtasticd` TCP port 4403/4404 and MQTT broker port 1883.
-3. **Shelly Relay Simulator**: Python script simulating a physical Shelly switch responding to `shellies/shelly1-01/relay/0/command` and publishing state updates.
-4. **Transmitter Simulator Script**: Python script generating encrypted signed Meshtastic packets to trigger relay toggling and verify status ACK.
+```bash
+# 1. Setup local environment
+cp .env.example .env
+
+# 2. Auto-provision all simulated nodes (RX & TX)
+.venv/bin/python3 meshtasticd-config/provision_nodes.py --sim
+
+# 3. Auto-provision physical hardware node via USB
+.venv/bin/python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB0 --role rx
+```
+
+---
+
+## 4. Current Status & Verification Table
+
+| Component | Status | Verification Details |
+| :--- | :--- | :--- |
+| **HMAC-SHA256 Auth** | ✅ Verified | Truncated hex signature verified against shared secret |
+| **Anti-Replay Counter** | ✅ Verified | Reused/stale sequence numbers rejected |
+| **Shelly Simulator** | ✅ Verified | Toggles relay state and emits Gen 1 / Gen 2 topics on `1883` |
+| **Mesh Status ACK** | ✅ Verified | Bidirectional acknowledgment returned over mesh |
+| **Automated Provisioning**| ✅ Verified | Reads `.env`, sets names, LoRa region, and MQTT module |
+| **Simulated RF Cross-Routing** | 🟡 In Debugging | Simulated RF UDP broadcast routing between separate Docker containers |

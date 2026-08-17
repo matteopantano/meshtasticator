@@ -103,12 +103,13 @@ Full details, JSON payload schemas, security specs, and simulation steps are pre
 - **Radio Link Encryption**: AES-256-CTR over dedicated secondary private channel (`HomeControl`).
 - **Data Payload**: Compact JSON over `SERIAL_APP` / `TEXT_MESSAGE_APP` containing `ver`, `target`, `action`, `seq`, `sig`.
 - **Security & Authorization**: Gateway checks sender Node ID whitelist, verifies `HMAC-SHA256(CONTROL_SECRET, ...)` signature, and enforces monotonic `seq` to prevent replay attacks.
-- **Shelly MQTT Integration**: Gateway publishes to Shelly MQTT topics (`shellies/shelly1-<id>/relay/0/command` or Gen2 RPC) and forwards status ACK back over LoRa.
-- **Simulation Steps**:
-  1. Add `mqtt-broker` (eclipse-mosquitto) to `docker-compose.yaml`.
-  2. Implement `meshtasticd-config/mqtt_bridge.py` for gateway logic.
-  3. Implement `meshtasticd-config/shelly_simulator.py` for smart relay simulation.
-  4. Execute `meshtasticd-config/send_control_cmd.py` to test end-to-end command & status feedback loop.
+- **Shelly MQTT Integration**: 
+- **Meshtastic RX (Gateway / Receiver)**: `meshtasticd-rx` daemon (TCP 4404 via proxy `ws-proxy-rx`, Web UI on `http://localhost:8080`).
+- **Meshtastic TX (Controller / Transmitter)**: `meshtasticd-tx` daemon (TCP 4405 via proxy `ws-proxy-tx`, Web UI on `http://localhost:8081`).
+- **MQTT Broker**: `mosquitto-broker` (Eclipse Mosquitto 2.0 on port 1883).
+- **Shelly Smart Relay Simulator**: `meshtasticd-config/shelly_simulator.py` (simulates Gen1/Gen2 Shelly topics).
+- **Gateway Bridge**: `meshtasticd-config/mqtt_bridge.py` (receives signed packets from RX node, validates HMAC-SHA256 and sequence counter, forwards to MQTT, sends ACK).
+- **Transmitter Test Client**: `meshtasticd-config/send_control_cmd.py` (sends signed packets to TX node).
 
 ---
 

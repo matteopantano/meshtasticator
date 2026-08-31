@@ -69,6 +69,22 @@ Run the official native C++ Meshtastic daemon (`meshtasticd`) in simulation mode
 
 - **Detailed Technical Guide**: See [CLAUDE.md](CLAUDE.md) for proxy framing details and architecture notes.
 
+### Multi-Node Testbed & IoT/MQTT Integration
+
+`docker-compose.yaml` runs a **two-node mesh testbed** (`meshtasticd-rx` +
+`meshtasticd-tx`, each with its own `ws-proxy`/Web UI) bridged by a
+simulated RF cross-routing service (`sim-radio-bridge`), plus a Mosquitto
+MQTT broker. This is used to demonstrate and test a secure Meshtastic ➔
+MQTT ➔ Shelly smart-relay control pipeline (HMAC-SHA256 signed commands,
+anti-replay protection, sender whitelisting).
+
+- **Full pipeline design, security spec, and testing guide**: see
+  [MQTT_SHELLY_SIMULATION.md](MQTT_SHELLY_SIMULATION.md).
+- **Standalone ESP32 firmware** (replaces the Python bridge on physical
+  hardware): see [firmware/esp32-gateway/](firmware/esp32-gateway/).
+- **Physical hardware deployment guide**: see
+  [HARDWARE_DEPLOYMENT_GUIDE.md](HARDWARE_DEPLOYMENT_GUIDE.md).
+
 ---
 
 ## 🧪 Tests & Setup
@@ -82,7 +98,7 @@ pip install -r requirements.txt
 
 ### Running Unit Tests
 ```bash
-python3 -m unittest
+python3 -m unittest discover tests -v
 ```
 
 ---

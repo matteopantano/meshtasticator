@@ -69,3 +69,12 @@ config.local.yaml
 *.local.json
 instructions.txt
 
+# PlatformIO / Arduino firmware build artifacts
+firmware/**/.pio/
+firmware/**/.pioenvs/
+firmware/**/.piolibdeps/
+firmware/**/build/
+*.bin
+*.elf
+*.hex
+

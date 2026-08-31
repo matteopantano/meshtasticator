@@ -62,17 +62,69 @@ To keep LoRa payload sizes minimal (< 200 bytes) while enabling full validation 
 
 ---
 
-### B. Security & Verification Pipeline
+### B. Zero-Trust Security & Verification Pipeline
 
-1. **Sender Node ID Whitelist**:
-   - Gateway verifies `FromRadio.from` equals Node TX's exact 32-bit Node ID.
-2. **HMAC Signature (Cryptographic Authorization)**:
-   - Node TX and Gateway share a secret key `CONTROL_SECRET`.
-   - Node TX computes `sig = Truncate8(HMAC_SHA256(CONTROL_SECRET, "shelly1-sim01:ON:1042"))`.
-   - Gateway recalculates HMAC and drops request if signatures do not match.
-3. **Anti-Replay Protection (Nonce / Sequence Tracking)**:
-   - Gateway stores `last_seen_seq` per Node ID.
-   - If `seq <= last_seen_seq`, packet is rejected as a duplicate or replay attack.
+The gateway (`meshtasticd-config/mqtt_bridge.py`, or the standalone
+`firmware/esp32-gateway/` firmware) treats **every** incoming mesh packet as
+untrusted until it passes all three checks below, in order. Any failure
+causes the packet to be **silently dropped** (no ACK, no error reply) so
+that an attacker cannot use error responses to fingerprint the validation
+logic.
+
+1. **Sender Node ID Whitelist** (`Check 1/3`):
+   - The gateway verifies the packet's `from` (Node ID, e.g. `!a1b2c3d4`)
+     against a configured `allowed_nodes` list (`--allowed-nodes` CLI flag in
+     `mqtt_bridge.py`, default `["*"]` for simulation/dev; a hardcoded C
+     array in the ESP32 firmware for production).
+   - Packets from unlisted senders are rejected before any further
+     processing (cheap fail-fast rejection).
+2. **Anti-Replay Protection (Monotonic Sequence Tracking)** (`Check 2/3`):
+   - The gateway keeps an in-memory map of `last_seen_seq` per sender Node
+     ID (`self.last_seen_seq[from_id]` in Python; a per-node array in the
+     firmware).
+   - A command is only accepted if `seq > last_seen_seq[from_id]`; otherwise
+     it is rejected as a **replay attack** (a captured-and-resent packet, or
+     an out-of-order/duplicate delivery).
+   - Callers are expected to use a monotonically increasing value for
+     `seq` (a simple incrementing counter or a Unix timestamp both work;
+     `send_control_cmd.py --seq <int>` lets you override it explicitly for
+     testing, and also exposes `--replay` / `--bad-sig` flags that
+     deliberately violate checks 2 and 3 to verify the gateway rejects
+     them).
+3. **HMAC-SHA256 Signature (Cryptographic Authorization)** (`Check 3/3`):
+   - Node TX and the Gateway share a secret key `CONTROL_SECRET` (from
+     `.env` / `CONTROL_SECRET` env var, **never committed to git**).
+   - The canonical signing string is built as
+     `f"{target}:{action.upper()}:{seq}"` (colon-delimited, action
+     upper-cased, `seq` as its decimal string representation).
+   - The signature is the first **8 hex characters** (4 bytes) of
+     `HMAC-SHA256(CONTROL_SECRET, canonical_string)`:
+     ```python
+     def compute_hmac_sig(secret: str, target: str, action: str, seq: int) -> str:
+         canonical = f"{target}:{action.upper()}:{seq}"
+         digest = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+         return digest[:8]
+     ```
+     (verbatim from `meshtasticd-config/mqtt_bridge.py` /
+     `meshtasticd-config/send_control_cmd.py`).
+   - The gateway recomputes the expected signature and compares it to the
+     received `sig` using a **constant-time comparison**
+     (`hmac.compare_digest`, case-insensitive) to prevent timing-attack
+     signature recovery. Any mismatch (including tampered `target`,
+     `action`, or `seq`) is rejected.
+   - Only after the signature check passes does `last_seen_seq[from_id]`
+     get updated to the new `seq` - so a rejected/tampered packet can never
+     advance a victim's sequence counter and invalidate their next
+     legitimate command.
+   - The ESP32 firmware performs the equivalent computation natively via
+     `mbedtls/md.h`'s `mbedtls_md_hmac_*` API (see
+     `firmware/esp32-gateway/src/main.cpp`), producing byte-identical
+     results to the Python implementation for the same secret/inputs.
+
+Only once all three checks pass does the gateway publish the command to the
+Shelly's MQTT topic and register a `pending_requests[target]` entry so the
+subsequent Shelly state-change event can be matched back to the original
+sender/seq for the ACK.
 
 ---
 
@@ -115,6 +167,7 @@ cp .env.example .env
 | **Mesh Status ACK** | ✅ Verified | Bidirectional acknowledgment returned over mesh |
 | **Automated Provisioning**| ✅ Verified | Reads `.env`, sets names, LoRa region, and MQTT module |
 | **Simulated RF Cross-Routing** | ✅ Verified | `meshtasticd-config/sim_rf_bridge.py` cross-relays `SIMULATOR_APP` (portnum 69) packets between `ws-proxy-rx:4404` and `ws-proxy-tx:4404` mux ports, running as the `sim-radio-bridge` Docker service |
+| **ESP32 Standalone Firmware** | 🔲 Scaffolded | `firmware/esp32-gateway/` implements the same HMAC/anti-replay pipeline natively (SoftAP + `TinyMqtt` + `mbedtls`); pending physical hardware validation |
 
 ---
 
@@ -179,3 +232,57 @@ network), run e.g.:
 Replace `<ESP32_IP>` with the ESP32 hub's LAN address (e.g. `192.168.1.50`
 or its SoftAP address `192.168.4.1`). No code changes are required - this
 is purely a command-line configuration switch.
+
+---
+
+## 6. Hybrid Testing: Simulated Mesh + Physical ESP32 SoftAP Broker
+
+You do not need to flash the `firmware/esp32-gateway/` sketch to exercise
+it - you can keep the Docker-based simulated mesh (`meshtasticd-rx`/`tx`,
+`sim-radio-bridge`) running while pointing every MQTT-speaking Python
+component at a **real ESP32 acting as the MQTT broker** on its SoftAP at
+`192.168.4.1:1883`. This validates the ESP32's `TinyMqtt` broker, its
+HMAC/anti-replay firmware logic, and the Shelly wiring, without needing
+physical Meshtastic radio hardware.
+
+1. **Flash and power on the ESP32** running
+   `firmware/esp32-gateway/src/main.cpp` (see
+   `firmware/esp32-gateway/README.md` for flashing steps). Confirm over
+   serial that it prints its SoftAP SSID (`Mesh-Gateway`) and IP
+   (`192.168.4.1`).
+2. **Join the ESP32's Wi-Fi network** from the machine running the Python
+   tooling (or route to it) so `192.168.4.1:1883` is reachable.
+3. **Start the Docker simulated-mesh stack** as usual so `meshtasticd-rx`
+   and `meshtasticd-tx` can exchange simulated LoRa packets:
+   ```bash
+   docker compose up -d
+   .venv/bin/python3 meshtasticd-config/provision_nodes.py --sim
+   ```
+   (You do **not** need to start the bundled `mqtt-broker` / `mosquitto`
+   service for this hybrid test - the ESP32 is the broker.)
+4. **Point the Shelly simulator at the ESP32 broker** instead of Mosquitto:
+   ```bash
+   .venv/bin/python3 meshtasticd-config/shelly_simulator.py \
+     --host 192.168.4.1 --port 1883 --id shelly1-sim01
+   ```
+   (Or skip this step entirely and connect a **real Shelly** to
+   `192.168.4.1:1883` as described in
+   `firmware/esp32-gateway/README.md` §"Connecting a Real Shelly".)
+5. **Send a signed command through the simulated mesh** with
+   `send_control_cmd.py` exactly as in the fully-simulated flow (the
+   ESP32 only needs to be reachable as the MQTT broker; the mesh transport
+   itself is still the Docker `sim-radio-bridge`):
+   ```bash
+   .venv/bin/python3 meshtasticd-config/send_control_cmd.py \
+     --mesh-port 4406 --target shelly1-sim01 --action ON
+   ```
+6. Optionally, run `mqtt_bridge.py` itself against the ESP32 broker (see
+   the command above) instead of / alongside the ESP32's own native
+   verification, to cross-check that both the Python and firmware HMAC
+   implementations accept/reject the exact same packets.
+
+**Expected result**: the ESP32 serial monitor logs the incoming signed
+JSON command, the three security checks (whitelist / anti-replay / HMAC),
+the outgoing `shellies/<id>/relay/0/command` publish, and the ACK it
+publishes back once it observes the Shelly's `shellies/<id>/relay/0`
+status topic change.

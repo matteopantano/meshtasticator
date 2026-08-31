@@ -33,12 +33,18 @@ exactly where the previous session left off.
      ```
 
 4. **Docker**:
-   - ✅ **Docker is now installed** on this machine (confirmed by user in the
-     current session). Phase 2 below (simulated RF UDP relay) can now be
-     fully implemented AND verified end-to-end with `docker compose up -d`.
-     Next step to resume: **Phase 2**, using the research findings recorded
-     in its section below (already completed - do not re-research from
-     scratch, the exact UDP mechanism has been identified).
+   - ✅ **Docker is now installed** on this machine (confirmed by user in a
+     prior session). Phase 2 below (simulated RF TCP cross-routing bridge,
+     `meshtasticd-config/sim_rf_bridge.py`) can be fully implemented AND
+     verified end-to-end with `docker compose up -d --build`. The full
+     technical design (protocol, ports, exact protobuf fields) has been
+     finalized this session - see the "Why UDP/multicast is a dead end",
+     "Critical architecture correction", "Exact protobuf relay mechanics",
+     and "Implementation steps" subsections under Phase 2 below. **Nothing
+     has been implemented yet** (no `sim_rf_bridge.py` file exists, and
+     `docker-compose.yaml` does not yet have the `sim-radio-bridge`
+     service) - next session should go straight to Phase 2's
+     "Implementation steps" and write the code.
 
 5. **Web UI NGINX Proxy Fix (`meshtasticd-config/nginx.conf`)** - DONE:
    - Fixed a bug where `proxy_pass` pointed to a non-existent upstream name
@@ -171,137 +177,220 @@ files do to avoid deprecation warnings/errors.
 
 ---
 
-### Phase 2: Simulated RF UDP Cross-Routing Bridge for Docker Multi-Node Stack
+### Phase 2: Simulated RF TCP Cross-Routing Bridge for Docker Multi-Node Stack
 
 **Goal**: Enable `meshtasticd-tx` and `meshtasticd-rx` (in separate Docker
-containers) to exchange simulated LoRa RF traffic over UDP, which Docker's
-default bridge network does not allow for broadcast packets between
-containers. Currently tracked as `🟡 In Debugging` in
-`MQTT_SHELLY_SIMULATION.md`.
+containers) to exchange simulated LoRa RF traffic, which Docker's default
+bridge network does not provide automatically since `meshtasticd -s`
+(`SimRadio`) has no radio-layer networking of its own. Currently tracked as
+`🟡 In Debugging` in `MQTT_SHELLY_SIMULATION.md`.
+
+**Status as of this session: ✅ FULL TECHNICAL DESIGN FINALIZED, NOT YET
+IMPLEMENTED.** All open research questions from the previous session are now
+resolved (see below). The UDP/multicast investigation is now **moot** - read
+"Why UDP/multicast is a dead end" below before doing anything else. Next
+session should go straight to "Implementation steps" further down; no more
+firmware source spelunking is needed.
 
 **Files to create/modify**:
-- `meshtasticd-config/udp_radio_bridge.py` (new)
+- `meshtasticd-config/sim_rf_bridge.py` (new - **use this name, not
+  `udp_radio_bridge.py`**; there is no UDP involved, naming it that would be
+  misleading)
 - `docker-compose.yaml` (add a `sim-radio-bridge` service)
 - `MQTT_SHELLY_SIMULATION.md` (update status table entry to `✅ Verified` once
-  confirmed working)
+  confirmed working, plus document how to point `mqtt_bridge.py` at a
+  physical ESP32/LAN MQTT broker)
 
-**Implementation notes**:
+#### Why UDP/multicast is a dead end (confirmed this session, don't re-check)
 
-**✅ RESEARCH COMPLETED (this session) - see "UDP mechanism research
-findings" subsection right below for the full write-up.** Do not re-research
-`SimRadio` from scratch next session; read that subsection first.
+`meshtasticd -s` uses `SimRadio` (`src/platform/portduino/SimRadio.{h,cpp}`),
+confirmed via `curl` to raw.githubusercontent.com against
+`meshtastic/firmware` master (prefer plain `curl` over the
+`fetch_web_content` tool for raw GitHub file fetches - the tool's extraction
+sometimes truncates/omits large code blocks silently, whereas `curl` gives
+the full byte-exact file to grep/sed through). `SimRadio::startSend()` just
+calls `service->sendToPhone(p)` - it loops the packet back out over the
+**same node's own phone/API TCP connection only**, re-framed as a
+`SIMULATOR_APP` packet (portnum 69). `SimRadio` has **zero UDP/socket code**.
+The separate `UdpMulticastHandler` real-UDP-multicast feature (group
+`224.0.0.69:4403`, gated by `#ifdef HAS_UDP_MULTICAST`) is completely
+unrelated to `-s` sim mode - it's for physically separate real nodes on a LAN
+and is never consulted by `SimRadio`. **Conclusion: there is no UDP mechanism
+to investigate for this use case at all.** The only way to relay
+`SIMULATOR_APP` events between two `meshtasticd -s` containers is an external
+TCP-level relay that speaks the existing phone/API protobuf protocol on each
+side - which is exactly what `sim_rf_bridge.py` must do.
 
-- `udp_radio_bridge.py` should open a UDP socket bound to `0.0.0.0` on the
-  relevant port, set `SO_REUSEADDR` (and `SO_BROADCAST`/`IP_ADD_MEMBERSHIP`
-  for multicast group `224.0.0.69` if the multicast path below is confirmed
-  viable), and forward/reflect received datagrams to the other known
-  container(s) on the `meshtastic` Docker network (e.g. by resolving
-  `meshtasticd-rx` / `meshtasticd-tx` hostnames via Docker's embedded DNS). If
-  going the TCP-relay fallback route instead (see below), this file should be
-  renamed/repurposed accordingly (e.g. `sim_rf_bridge.py`) and use `asyncio`
-  following the exact same framing helper pattern already in `proxy.py`'s
-  `meshtastic_tcp_loop()`.
-#### UDP mechanism research findings (completed this session)
+#### Critical architecture correction: which TCP port to connect to (confirmed this session)
 
-Fetched directly from `meshtastic/firmware` upstream via `curl` to
-raw.githubusercontent.com (works fine from this sandbox; prefer plain `curl`
-over the `fetch_web_content` tool for raw GitHub file fetches - the tool's
-extraction sometimes truncates/omits large code blocks silently, whereas
-`curl` gives the full byte-exact file to grep/sed through):
+The original plan assumed the bridge would open two new raw TCP connections
+straight to `meshtasticd-rx:4403` and `meshtasticd-tx:4403`. **This is wrong
+and would conflict with the existing `ws-proxy-rx`/`ws-proxy-tx` containers.**
+Confirmed via `curl` of `meshtastic/firmware`'s `src/mesh/api/ServerAPI.h`:
 
-1. **`SimRadio` (`src/platform/portduino/SimRadio.{h,cpp}`)** - active when
-   `meshtasticd` runs with `-s`/`--sim` (`force_simradio` in
-   `PortduinoGlue.cpp`). **This has NO UDP socket at all.** `startSend()`
-   just calls `service->sendToPhone(p)` (loops the packet back out over the
-   same node's own phone/API connection, re-framed as a `SIMULATOR_APP`
-   packet), and `unpackAndReceive()` is the inverse entry point for feeding a
-   `SIMULATOR_APP` packet back in as if received over the air. **There is no
-   automatic cross-container relay** - each `meshtasticd -s` instance is
-   fully isolated at the radio layer; nothing bridges TX's send to RX's
-   receive by itself. This confirms the `docker-compose.yaml` setup as
-   currently written cannot possibly relay LoRa traffic between
-   `meshtasticd-tx` and `meshtasticd-rx` without an explicit external bridge
-   - which is exactly the gap Phase 2 needs to fill.
-2. **`UdpMulticastHandler` (`src/mesh/udp/UdpMulticastHandler.h`)** - a
-   *different*, separate feature: real UDP multicast group
-   `224.0.0.69:4403` (`UDP_MULTICAST_DEFAUL_PORT = 4403`), gated by
-   `#ifdef HAS_UDP_MULTICAST` in `main.cpp` and by the runtime flag
-   `config.network.enabled_protocols &
-   meshtastic_Config_NetworkConfig_ProtocolFlags_UDP_BROADCAST`. This is
-   meant for physically-separate real nodes on the same LAN to discover each
-   other, independent of the `-s` sim mode. **Unresolved**: grepping the
-   vendored `configuration.h` and
-   `src/platform/portduino/architecture.h` headers did not turn up a
-   `#define HAS_UDP_MULTICAST` for `ARCH_PORTDUINO`, suggesting the
-   Docker Hub `meshtastic/meshtasticd:latest` binary may or may not have
-   this compiled in - **could not confirm definitively without shelling into
-   a running container binary**. There's also a separate portduino-only
-   `Config.EnableUDP` YAML toggle handled in `PortduinoGlue.cpp` (~line 1040,
-   `yamlConfig["Config"]["EnableUDP"]`) that is distinct from the
-   ESP32-style bitmask above - untested whether it does anything relevant on
-   this platform.
+> `APIServerPort`... "we currently only allow **one open TCP connection at a
+> time**, because we depend on the `loop()` call in this class to delegate to
+> the worker. Once coroutines are implemented we can relax this restriction."
 
-**Action items for next session** (in priority order):
-1. `docker compose up -d meshtasticd-rx` then
-   `docker exec -it meshtasticd-rx sh -c "strings $(which meshtasticd) | grep -i 'udp\|multicast'"`
-   (or check `meshtasticd --help`) to determine if `HAS_UDP_MULTICAST` /
-   `UdpMulticastHandler` is actually compiled into this image's binary.
-2. If yes: add `Config: EnableUDP: true` and set
-   `network.enabled_protocols` to include `UDP_BROADCAST` (via
-   `provision_nodes.py` or manually with `meshtastic --set
-   network.enabled_protocols ...`) in `meshtasticd-config/config.yaml` /
-   provisioning, and write `udp_radio_bridge.py` as a **multicast group
-   reflector**: join `224.0.0.69:4403` on the `meshtastic` docker network
-   (join with `IP_ADD_MEMBERSHIP`), and since Linux bridge networks *should*
-   propagate real IP multicast between containers on the same
-   user-defined bridge without an extra relay needed at all, first just TEST
-   whether `meshtasticd-tx` and `meshtasticd-rx` can already see each other's
-   multicast packets with no extra container in between (e.g. `tcpdump -i any
-   udp port 4403` in each container) before writing any bridge code - the
-   bridge service may turn out to be unnecessary if Docker's bridge network
-   already forwards multicast correctly.
-3. If no (multicast not compiled in, or doesn't traverse the bridge network):
-   fall back to an **application-level TCP relay** instead of a raw UDP
-   bridge: write `sim_rf_bridge.py` (asyncio, reusing `proxy.py`'s exact
-   framing pattern - `START1=0x94, START2=0xc3` + 2-byte big-endian length
-   header) that opens two TCP connections to `meshtasticd-rx:4403` and
-   `meshtasticd-tx:4403`, decodes `FromRadio` protobufs looking for
-   `packet.which_payload_variant == meshtastic_MeshPacket_encrypted_tag`
-   frames representing radio TX events, and re-injects them as `ToRadio`
-   frames (wrapped appropriately) into the *other* node's TCP connection -
-   effectively software-simulating RF propagation between the two
-   containers. This sidesteps the open compiled-in-multicast question
-   entirely and is guaranteed to work since the TCP API (used already by
-   `mqtt_bridge.py`/`send_control_cmd.py`/`proxy.py`) is confirmed
-   functional. Whichever path is chosen, verify success by tailing
-   `docker compose logs -f meshtasticd-rx meshtasticd-tx` while running
-   `send_control_cmd.py` from the TX side, watching for "Lora RX" /
-   "enqueuing for send" log lines to confirm the packet actually crossed
-   over from TX to RX (not just looped back to itself).
+Each `meshtasticd -s` process's port `4403` accepts only **one** client
+connection total. In the current `docker-compose.yaml`, that single slot on
+`meshtasticd-rx:4403` is already permanently held by `ws-proxy-rx`'s
+background `meshtastic_tcp_loop()` task (same for `meshtasticd-tx:4403` /
+`ws-proxy-tx`). If `sim_rf_bridge.py` also tried to connect directly to
+`:4403`, it would race/conflict with the proxy that's already connected.
 
-- Add the new service to `docker-compose.yaml` (adjust based on the actual UDP
-  port/protocol discovered above, or repurpose as a TCP relay per the fallback
-  plan above):
-  ```yaml
-  sim-radio-bridge:
-    image: python:3.11-slim
-    container_name: meshtastic-sim-radio-bridge
-    restart: unless-stopped
-    command: sh -c "python -u /app/udp_radio_bridge.py"
-    volumes:
-      - ./meshtasticd-config/udp_radio_bridge.py:/app/udp_radio_bridge.py:ro
-    networks:
-      - meshtastic
-    depends_on:
-      - meshtasticd-rx
-      - meshtasticd-tx
-  ```
+**The fix**: `proxy.py` already solves exactly this "multiple TCP clients,
+one upstream connection" problem for its own purposes - it exposes a **TCP
+multiplexer on port 4404** (`TCPClientProtocol`/`tcp_clients` set in
+`proxy.py`): any bytes written by a mux client are forwarded to the single
+real upstream connection, and any raw framed bytes coming from the real
+device are broadcast to **all** connected mux clients. This is precisely why
+`mqtt_bridge.py` and `send_control_cmd.py` already connect to port
+`4404`/`4406` (the *mux* ports) rather than `4403` directly.
+`sim_rf_bridge.py` must do the same: on the Docker network, connect to
+**`ws-proxy-rx:4404`** and **`ws-proxy-tx:4404`** (the container-internal mux
+port both proxy containers listen on - not the host-mapped `4404`/`4406`,
+those are only for host-side tools), never to `meshtasticd-rx:4403` /
+`meshtasticd-tx:4403` directly.
 
-**Verification steps** (requires Docker installed first - see Section 1 above):
+#### Exact protobuf relay mechanics (confirmed this session)
+
+Traced the full round-trip through `meshtastic/firmware` master via `curl`:
+
+1. When a `meshtasticd -s` node transmits, `SimRadio::startSend()` builds a
+   `meshtastic_Compressed` message (fields: `portnum`, `data`) containing the
+   *original* portnum + payload bytes, serializes that into
+   `p->decoded.payload`, sets `p->decoded.portnum = SIMULATOR_APP` (enum
+   value **69** - confirmed via
+   `.venv/bin/python3 -c "from meshtastic.protobuf import portnums_pb2; print(portnums_pb2.PortNum.SIMULATOR_APP)"` → `69`),
+   then calls `service->sendToPhone(p)`. This arrives at whichever client is
+   connected to that node's port 4403 (i.e. the corresponding `ws-proxy-*`
+   container) as a framed `FromRadio` protobuf whose `.packet` is this
+   `MeshPacket` (with `decoded.portnum == 69`).
+2. To make the *other* node "receive" this over simulated RF, send a
+   `ToRadio` protobuf (`toRadio.packet.CopyFrom(that_same_MeshPacket)`) into
+   the other node's mux connection. `PhoneAPI::handleToRadio()` on that node
+   receives it, calls `MeshService::handleToRadio(p)`, which contains exactly
+   this gate (confirmed via `curl` of `src/mesh/MeshService.cpp`):
+   ```cpp
+   if (SimRadio::instance && p.decoded.portnum == meshtastic_PortNum_SIMULATOR_APP) {
+       SimRadio::instance->unpackAndReceive(p);
+   }
+   ```
+   `SimRadio::unpackAndReceive()` unwraps the `Compressed` payload back to
+   the original portnum/payload and calls `startReceive()` - i.e. the other
+   node genuinely believes it just received this packet over its LoRa chip
+   (log line `"Lora RX"` from `SimRadio::handleReceiveInterrupt()`), and it
+   flows into `deliverToReceiver()` → `Router` → `meshtastic.receive` pubsub
+   → exactly what `mqtt_bridge.py`/`send_control_cmd.py` already listen for.
+3. **Python-side field access** (already confirmed against the installed
+   `meshtastic` package in `.venv`, no guesswork needed):
+   - `mesh_pb2.FromRadio` has a `.packet` field of type
+     `meshtastic.protobuf.MeshPacket` (same for `mesh_pb2.ToRadio.packet`).
+   - Check `from_radio.packet.decoded.portnum == 69` (import
+     `from meshtastic.protobuf import mesh_pb2, portnums_pb2` and compare to
+     `portnums_pb2.PortNum.SIMULATOR_APP`). There is no
+     `meshtastic_MeshPacket_encrypted_tag` check needed/relevant here - that
+     was a wrong guess in the prior session's notes; simulated packets are
+     always in the `decoded` oneof branch with portnum 69, never `encrypted`.
+   - Relay by literally copying the whole `MeshPacket`:
+     `to_radio = mesh_pb2.ToRadio(); to_radio.packet.CopyFrom(from_radio.packet)`,
+     then `to_radio.SerializeToString()`, then wrap with the same 4-byte
+     `START1(0x94) START2(0xC3) lenHi lenLo` header used everywhere else in
+     this repo (`stream_interface.py` `START1`/`START2`/`HEADER_LEN`,
+     mirrored already in `proxy.py`).
+   - Framing/parsing loop: reuse the exact buffering algorithm already in
+     `proxy.py`'s `meshtastic_tcp_loop()` (scan for `START1,START2`, read
+     2-byte big-endian length, wait for full frame, slice it off) - do not
+     reinvent it, just copy the pattern for each of the two mux connections.
+4. **Loop-prevention caution**: `PhoneAPI::handleToRadio()` normally
+   deduplicates repeated packet IDs from the phone via
+   `wasSeenRecently(p.id)`, but that check is explicitly skipped when
+   `SimRadio::instance != nullptr` (confirmed via `curl` grep of
+   `PhoneAPI.cpp`: `"if the simulator, we should not ignore duplicate
+   packets from the phone"`). This is correct for legitimate multi-hop
+   rebroadcasts, but means `sim_rf_bridge.py` itself must track which
+   `(from, id)` pairs it has already relayed *in which direction* and not
+   immediately bounce a packet back to the node it just came from (a simple
+   `set()` of recently seen `(from, id)` tuples per direction, expired after
+   a few seconds, is sufficient - do not overthink this into full
+   mesh-routing logic; the discrete-event simulator in `lib/` already does
+   real RF simulation, this bridge only needs to be a dumb store-and-forward
+   relay for the two-node Docker demo).
+
+#### Implementation steps (ready to execute, no further research needed)
+
+1. Write `meshtasticd-config/sim_rf_bridge.py`:
+   - `asyncio`, module-level `START1 = 0x94`, `START2 = 0xC3`,
+     `HEADER_LEN = 4` constants (copy from `proxy.py`).
+   - Read target hostnames from env vars with sane defaults, e.g.
+     `RX_MUX_HOST=ws-proxy-rx`, `RX_MUX_PORT=4404`, `TX_MUX_HOST=ws-proxy-tx`,
+     `TX_MUX_PORT=4404` (all overridable so this also works if container
+     names ever change).
+   - Two long-lived `asyncio.open_connection()` tasks (one per node), each
+     with the same reconnect-with-backoff pattern as
+     `proxy.py::meshtastic_tcp_loop()`.
+   - On receiving a complete framed `FromRadio` from node A's mux connection:
+     decode with `mesh_pb2.FromRadio.FromString(payload)`; if
+     `from_radio.HasField("packet")` and
+     `from_radio.packet.decoded.portnum == portnums_pb2.PortNum.SIMULATOR_APP`,
+     and `(getattr(from_radio.packet, "from"), from_radio.packet.id)` not
+     already relayed recently from B→A (anti-loop), then build `ToRadio`,
+     frame it, write it to node B's mux writer, and record `(from, id)` as
+     relayed A→B.
+   - Print clear stdout logs (`[SimRF Bridge] TX -> RX: packet id=... from=... portnum=...`)
+     for observability while debugging via `docker compose logs`.
+2. Add to `docker-compose.yaml`:
+   ```yaml
+   sim-radio-bridge:
+     image: python:3.11-slim
+     container_name: meshtastic-sim-radio-bridge
+     restart: unless-stopped
+     environment:
+       - RX_MUX_HOST=ws-proxy-rx
+       - RX_MUX_PORT=4404
+       - TX_MUX_HOST=ws-proxy-tx
+       - TX_MUX_PORT=4404
+     command: sh -c "pip install meshtastic && python -u /app/sim_rf_bridge.py"
+     volumes:
+       - ./meshtasticd-config/sim_rf_bridge.py:/app/sim_rf_bridge.py:ro
+     depends_on:
+       - ws-proxy-rx
+       - ws-proxy-tx
+     networks:
+       - meshtastic
+   ```
+   (`pip install meshtastic` at container start mirrors the existing
+   `ws-proxy-*` services' `pip install tornado` pattern - keeps the image
+   generic `python:3.11-slim` without a custom Dockerfile/build step. Only
+   `meshtastic.protobuf` is actually needed at runtime, but installing the
+   full `meshtastic` package is simplest and matches project convention of
+   avoiding extra Dockerfiles.)
+3. Verify success by tailing
+   `docker compose logs -f meshtasticd-rx meshtasticd-tx sim-radio-bridge`
+   while running `send_control_cmd.py` from the TX side, watching for
+   `"Lora RX"` / `"enqueuing for send"` log lines from `meshtasticd-rx` to
+   confirm the packet actually crossed over from TX to RX (not just looped
+   back to itself), plus the bridge's own `"TX -> RX"` relay log line.
+
+#### Hardware follow-up: pointing `mqtt_bridge.py` at a physical ESP32/LAN MQTT broker
+
+Already supported today - no code changes needed here, only verify/document:
+`mqtt_bridge.py`'s `argparse` already defines `--mqtt-host` (default
+`localhost`) and `--mqtt-port` (default `1883`, type `int`). To point it at a
+physical ESP32-hosted broker (or any Mosquitto/broker on the LAN) instead of
+the Dockerized `mosquitto-broker`, run e.g.:
 ```bash
-# Install Docker if not already present
-sudo apt install docker.io docker-compose-plugin
+.venv/bin/python3 meshtasticd-config/mqtt_bridge.py \
+  --mesh-port 4404 \
+  --mqtt-host 192.168.1.50 \
+  --mqtt-port 1883
+```
+This should be spelled out explicitly in `MQTT_SHELLY_SIMULATION.md` (see
+Phase 2 files-to-modify list above) as part of closing out this phase.
 
+**Verification steps**:
+```bash
 # Launch stack
 cd /home/matteo/meshtasticator
 docker compose up -d --build
@@ -324,6 +413,10 @@ toggles state -> ACK is relayed back to TX -> `send_control_cmd.py` prints
 "🎉 Status ACK Received via Meshtastic!". Also test failure paths with
 `--bad-sig` and `--replay` flags on `send_control_cmd.py` to confirm the
 gateway silently drops them (no ACK received, timeout message printed).
+Finally run `.venv/bin/python3 -m unittest discover tests -v` to confirm the
+existing 62 tests are unaffected by the Docker-only bridge addition (it lives
+entirely in `meshtasticd-config/`, is not imported by any test, and requires
+Docker/`meshtastic` package at runtime only, not at test-collection time).
 
 ---
 
@@ -372,21 +465,37 @@ source .venv/bin/activate       # or just call .venv/bin/python3 / .venv/bin/pip
 python -m unittest discover tests -v
 ```
 
-Ask Cline: **"Read RESUME_PLAN.md and implement Phase 2 (simulated RF UDP
+Ask Cline: **"Read RESUME_PLAN.md and implement Phase 2 (simulated RF TCP
 cross-routing bridge for the Docker multi-node stack)."** (Phase 1 - the unit
 test suite for the MQTT bridge and Shelly simulator - is already done; see
 the Phase 1 section above.)
 
-**Current status as of this session**: Docker is now installed and confirmed
-working on this machine. The upstream `meshtastic/firmware` source for
-`SimRadio` and `UdpMulticastHandler` has been fully researched (see the
-"UDP mechanism research findings" subsection under Phase 2 above) - key
-finding: `-s`/sim-mode `SimRadio` has **no built-in cross-container relay at
-all** (pure loopback to the same node's phone API), so Phase 2's bridge is
-necessary and not optional. Next session should start directly with
-"Action item 1" under that subsection (`docker exec` into `meshtasticd-rx` to
-check whether `HAS_UDP_MULTICAST` is compiled into the
-`meshtastic/meshtasticd:latest` image), then proceed down the decision tree
-(multicast reflector vs. TCP-level relay fallback) to implement
-`docker-compose.yaml` + the new bridge script, then run the full
-`docker compose up -d --build` verification steps listed in Phase 2.
+**Current status as of this session**: Docker is installed and confirmed
+working on this machine. The full Phase 2 design has been finalized and is
+**ready to implement with zero remaining unknowns** - no more firmware
+source research is needed. Key findings (all detailed in their own
+subsections under Phase 2 above):
+- `SimRadio` (`-s` sim mode) has **no UDP/multicast mechanism at all** - the
+  previous session's UDP/multicast investigation was a dead end; skip it
+  entirely (see "Why UDP/multicast is a dead end").
+- `meshtasticd`'s TCP API port `4403` only accepts **one client connection**
+  at a time (confirmed from `firmware/src/mesh/api/ServerAPI.h`), and that
+  slot is already permanently occupied by `ws-proxy-rx`/`ws-proxy-tx`. The
+  bridge must connect to each proxy's **TCP mux port `4404`**
+  (`ws-proxy-rx:4404` / `ws-proxy-tx:4404` on the Docker network) instead of
+  `meshtasticd-*:4403` directly (see "Critical architecture correction").
+- The exact relay mechanics are fully traced end-to-end: `SIMULATOR_APP`
+  portnum is `69`, `MeshService::handleToRadio()` has an explicit
+  `SimRadio::instance->unpackAndReceive(p)` gate for it, and the bridge's job
+  is simply to copy a received `FromRadio.packet` (with
+  `decoded.portnum == 69`) into a `ToRadio.packet` sent to the *other* mux
+  connection, framed with the standard `0x94 0xC3` + 2-byte length header
+  (see "Exact protobuf relay mechanics").
+- Next session should go straight to Phase 2's "Implementation steps"
+  subsection: write `meshtasticd-config/sim_rf_bridge.py`, add the
+  `sim-radio-bridge` service to `docker-compose.yaml`, then run the full
+  `docker compose up -d --build` verification steps listed in Phase 2,
+  followed by updating `MQTT_SHELLY_SIMULATION.md`'s status table and the
+  physical-ESP32-broker documentation (see "Hardware follow-up" subsection -
+  `mqtt_bridge.py` already supports `--mqtt-host`/`--mqtt-port`, this is
+  documentation-only, no code change needed there).

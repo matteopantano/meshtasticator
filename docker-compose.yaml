@@ -64,6 +64,27 @@ services:
       - meshtastic
 
   # ============================================================
+  # Simulated RF TCP Cross-Routing Bridge
+  # ============================================================
+  sim-radio-bridge:
+    image: python:3.11-slim
+    container_name: meshtastic-sim-radio-bridge
+    restart: unless-stopped
+    environment:
+      - RX_MUX_HOST=ws-proxy-rx
+      - RX_MUX_PORT=4404
+      - TX_MUX_HOST=ws-proxy-tx
+      - TX_MUX_PORT=4404
+    command: sh -c "pip install meshtastic && python -u /app/sim_rf_bridge.py"
+    volumes:
+      - ./meshtasticd-config/sim_rf_bridge.py:/app/sim_rf_bridge.py:ro
+    depends_on:
+      - ws-proxy-rx
+      - ws-proxy-tx
+    networks:
+      - meshtastic
+
+  # ============================================================
   # Unified Web UI Frontend
   # ============================================================
   web:

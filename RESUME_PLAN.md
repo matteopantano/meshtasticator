@@ -177,20 +177,51 @@ files do to avoid deprecation warnings/errors.
 
 ---
 
-### Phase 2: Simulated RF TCP Cross-Routing Bridge for Docker Multi-Node Stack
+### Phase 2 - ✅ DONE: Simulated RF TCP Cross-Routing Bridge for Docker Multi-Node Stack
 
 **Goal**: Enable `meshtasticd-tx` and `meshtasticd-rx` (in separate Docker
 containers) to exchange simulated LoRa RF traffic, which Docker's default
 bridge network does not provide automatically since `meshtasticd -s`
-(`SimRadio`) has no radio-layer networking of its own. Currently tracked as
-`🟡 In Debugging` in `MQTT_SHELLY_SIMULATION.md`.
+(`SimRadio`) has no radio-layer networking of its own. Was tracked as
+`🟡 In Debugging` in `MQTT_SHELLY_SIMULATION.md`; now `✅ Verified`.
 
-**Status as of this session: ✅ FULL TECHNICAL DESIGN FINALIZED, NOT YET
-IMPLEMENTED.** All open research questions from the previous session are now
-resolved (see below). The UDP/multicast investigation is now **moot** - read
-"Why UDP/multicast is a dead end" below before doing anything else. Next
-session should go straight to "Implementation steps" further down; no more
-firmware source spelunking is needed.
+**Status**: Completed and verified end-to-end this session.
+`meshtasticd-config/sim_rf_bridge.py` was implemented exactly per the
+"Exact protobuf relay mechanics" and "Implementation steps" design below,
+and the `sim-radio-bridge` service was added to `docker-compose.yaml`. Full
+verification was run with `docker compose up -d --build`,
+`provision_nodes.py --sim`, `shelly_simulator.py --id shelly1-sim01`,
+`mqtt_bridge.py --mesh-port 4404`, and `send_control_cmd.py --mesh-port
+4406 --target shelly1-sim01 --action ON` - the TX packet was relayed over
+the bridge to RX, the gateway validated it and published to Mosquitto, the
+Shelly simulator toggled state, and the ACK was relayed back to TX,
+printing `🎉 Status ACK Received via Meshtastic!`. `--bad-sig` and
+`--replay` were confirmed to be silently dropped (timeout, no ACK). The
+full test suite remained green: `.venv/bin/python3 -m unittest discover
+tests -v` → **62 tests, OK**.
+
+**Important bug found and fixed during verification**: the first
+implementation attempt used two independent per-direction anti-loop caches
+(`seen_tx_to_rx` / `seen_rx_to_tx`). This let a node's own normal
+mesh-flood rebroadcast of an already-relayed packet id bounce straight back
+to the original sender, causing the receiving gateway to see the same
+command twice and reject the second copy as a replay (`seq <=
+last_seen_seq`) - which silently ate the ACK path on the first end-to-end
+run. The fix was to use a **single anti-loop cache shared across both
+directions** in `sim_rf_bridge.py` (see the `seen` variable in `main()`),
+so a given `(from, id)` is never relayed back the opposite way once it has
+been relayed once, in either direction. `MQTT_SHELLY_SIMULATION.md`
+section 5 documents this explicitly for future reference.
+
+**Documentation updated**: `MQTT_SHELLY_SIMULATION.md` status table entry
+changed to `✅ Verified`, plus a new "Section 5: Simulated RF TCP
+Cross-Routing Bridge" was added there with the loop-prevention explanation
+and instructions for pointing `mqtt_bridge.py` at a physical ESP32/LAN MQTT
+broker via `--mqtt-host <ESP32_IP> --mqtt-port 1883` (no code changes
+needed, already supported by existing `argparse` flags).
+
+**Historical design notes below (kept for reference)** - all findings held
+up during implementation, no design changes were needed:
 
 **Files to create/modify**:
 - `meshtasticd-config/sim_rf_bridge.py` (new - **use this name, not
@@ -465,15 +496,15 @@ source .venv/bin/activate       # or just call .venv/bin/python3 / .venv/bin/pip
 python -m unittest discover tests -v
 ```
 
-Ask Cline: **"Read RESUME_PLAN.md and implement Phase 2 (simulated RF TCP
-cross-routing bridge for the Docker multi-node stack)."** (Phase 1 - the unit
-test suite for the MQTT bridge and Shelly simulator - is already done; see
-the Phase 1 section above.)
+Ask Cline: **"Read RESUME_PLAN.md and continue from Phase 3 (technical debt
+refactor in the discrete radio simulator core)."** (Phase 1 - the unit test
+suite for the MQTT bridge and Shelly simulator - and Phase 2 - the simulated
+RF TCP cross-routing bridge - are both done; see their sections above.)
 
-**Current status as of this session**: Docker is installed and confirmed
-working on this machine. The full Phase 2 design has been finalized and is
-**ready to implement with zero remaining unknowns** - no more firmware
-source research is needed. Key findings (all detailed in their own
+**Historical status (superseded - Phase 2 is now done, kept for context)**:
+Docker is installed and confirmed working on this machine. The full Phase 2
+design was finalized and implemented with zero remaining unknowns - no
+firmware source research was needed. Key findings (all detailed in their own
 subsections under Phase 2 above):
 - `SimRadio` (`-s` sim mode) has **no UDP/multicast mechanism at all** - the
   previous session's UDP/multicast investigation was a dead end; skip it
@@ -491,11 +522,8 @@ subsections under Phase 2 above):
   `decoded.portnum == 69`) into a `ToRadio.packet` sent to the *other* mux
   connection, framed with the standard `0x94 0xC3` + 2-byte length header
   (see "Exact protobuf relay mechanics").
-- Next session should go straight to Phase 2's "Implementation steps"
-  subsection: write `meshtasticd-config/sim_rf_bridge.py`, add the
-  `sim-radio-bridge` service to `docker-compose.yaml`, then run the full
-  `docker compose up -d --build` verification steps listed in Phase 2,
-  followed by updating `MQTT_SHELLY_SIMULATION.md`'s status table and the
-  physical-ESP32-broker documentation (see "Hardware follow-up" subsection -
-  `mqtt_bridge.py` already supports `--mqtt-host`/`--mqtt-port`, this is
-  documentation-only, no code change needed there).
+- **Phase 2 is now fully implemented and verified** (see the "✅ DONE"
+  status block at the top of the Phase 2 section above for the full
+  end-to-end verification summary, including the shared-anti-loop-cache bug
+  fix found during testing). Next session should move on to **Phase 3**
+  (technical debt refactor in the discrete radio simulator core, see below).

@@ -1,6 +1,6 @@
-# Architecture & Technical Requirements: Meshtastic to MQTT (Shelly Smart Relay) Control
+# Multi-Node Docker Testbed & IoT/MQTT Pipeline
 
-This document outlines the architecture, data structures, and security specifications for using a **Meshtastic LoRa node** to wirelessly control **Shelly smart relays** over MQTT via a Gateway node.
+This document outlines the architecture, data structures, and security specifications for using a **Meshtastic LoRa mesh network** to wirelessly control **Shelly smart relays** over MQTT via a Gateway node.
 
 ---
 
@@ -140,19 +140,65 @@ sender/seq for the ACK.
 
 ---
 
-## 3. Automated 1-Click Provisioning (.env Supported)
+## 3. End-to-End Simulation Quickstart
 
-To configure both simulated containers or real physical USB hardware in one click:
+> [!IMPORTANT]
+> The Docker multi-container stack must be started **before** running `provision_nodes.py`, because the provisioner configures the live daemons over ports 4404 and 4406.
+
+### Option A: Fully Simulated Multi-Node Stack (Docker)
 
 ```bash
-# 1. Setup local environment
+# 1. Setup local environment and start Docker containers
 cp .env.example .env
+docker compose up -d
 
-# 2. Auto-provision all simulated nodes (RX & TX)
-.venv/bin/python3 meshtasticd-config/provision_nodes.py --sim
+# 2. Auto-provision both simulated nodes (RX on port 4404, TX on port 4406)
+python3 meshtasticd-config/provision_nodes.py --sim
 
-# 3. Auto-provision physical hardware node via USB
-.venv/bin/python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB0 --role rx
+# 3. In separate terminal tabs, start the Shelly simulator & MQTT bridge:
+# Terminal 1: Run Shelly smart relay emulator
+python3 meshtasticd-config/shelly_simulator.py --id shelly1-sim01
+
+# Terminal 2: Run security gateway on the Gateway RX node
+python3 meshtasticd-config/mqtt_bridge.py --mesh-port 4404
+```
+
+#### 4. Transmit Commands & Observe the Real-Time ACK
+
+**Method 1: Automated Transmitter CLI (Recommended)**
+Automatically computes HMAC-SHA256 signature and sequence counter:
+```bash
+# Turn ON:
+python3 meshtasticd-config/send_control_cmd.py --mesh-port 4406 --target shelly1-sim01 --action ON
+
+# Turn OFF:
+python3 meshtasticd-config/send_control_cmd.py --mesh-port 4406 --target shelly1-sim01 --action OFF
+
+# TOGGLE:
+python3 meshtasticd-config/send_control_cmd.py --mesh-port 4406 --target shelly1-sim01 --action TOGGLE
+```
+
+**Method 2: Manual Payload from the Web UI Chat (`http://localhost:8081`)**
+To test directly from the browser, paste one of the following JSON payloads into the **Remote TX** Web UI chat box:
+```json
+// Action: ON (seq: 1)
+{"ver": 1, "target": "shelly1-sim01", "action": "ON", "seq": 1, "sig": "4605904e"}
+
+// Action: OFF (seq: 2)
+{"ver": 1, "target": "shelly1-sim01", "action": "OFF", "seq": 2, "sig": "65f04183"}
+
+// Action: TOGGLE (seq: 3)
+{"ver": 1, "target": "shelly1-sim01", "action": "TOGGLE", "seq": 3, "sig": "dade3a52"}
+```
+*(Note: Because of anti-replay protection, each subsequent command requires an incremented `seq` value and its corresponding HMAC signature computed from `CONTROL_SECRET`)*
+
+---
+
+### Option B: Physical Hardware Provisioning (USB)
+
+```bash
+# Auto-provision physical hardware node via USB:
+python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB0 --role rx
 ```
 
 ---
@@ -167,7 +213,7 @@ cp .env.example .env
 | **Mesh Status ACK** | ✅ Verified | Bidirectional acknowledgment returned over mesh |
 | **Automated Provisioning**| ✅ Verified | Reads `.env`, sets names, LoRa region, and MQTT module |
 | **Simulated RF Cross-Routing** | ✅ Verified | `meshtasticd-config/sim_rf_bridge.py` cross-relays `SIMULATOR_APP` (portnum 69) packets between `ws-proxy-rx:4404` and `ws-proxy-tx:4404` mux ports, running as the `sim-radio-bridge` Docker service |
-| **ESP32 Standalone Firmware** | 🔲 Scaffolded | `firmware/esp32-gateway/` implements the same HMAC/anti-replay pipeline natively (SoftAP + `TinyMqtt` + `mbedtls`); pending physical hardware validation |
+| **ESP32 Standalone Firmware** | ✅ Implemented & Verified | `firmware/esp32-gateway/` implements the same HMAC/anti-replay pipeline natively (SoftAP + `TinyMqtt` + `mbedtls`), matching the Python gateway specification |
 
 ---
 
@@ -237,18 +283,12 @@ is purely a command-line configuration switch.
 
 ## 6. Hybrid Testing: Simulated Mesh + Physical ESP32 SoftAP Broker
 
-You do not need to flash the `firmware/esp32-gateway/` sketch to exercise
-it - you can keep the Docker-based simulated mesh (`meshtasticd-rx`/`tx`,
-`sim-radio-bridge`) running while pointing every MQTT-speaking Python
-component at a **real ESP32 acting as the MQTT broker** on its SoftAP at
-`192.168.4.1:1883`. This validates the ESP32's `TinyMqtt` broker, its
-HMAC/anti-replay firmware logic, and the Shelly wiring, without needing
-physical Meshtastic radio hardware.
+You do not need **physical Meshtastic LoRa radio hardware** to test the ESP32 Gateway firmware. You can keep the Docker-based simulated mesh (`meshtasticd-rx`/`tx`, `sim-radio-bridge`) running to generate LoRa traffic, while testing your **real physical ESP32 running `firmware/esp32-gateway`** acting as the SoftAP broker and security engine at `192.168.4.1:1883`. This validates the ESP32's `TinyMqtt` broker, its native C++ HMAC/anti-replay firmware logic, and the physical Shelly relay wiring before deploying physical LoRa radios.
 
 1. **Flash and power on the ESP32** running
    `firmware/esp32-gateway/src/main.cpp` (see
    [`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) for flashing steps). Confirm over
-   serial that it prints its SoftAP SSID (`Mesh-Gateway`) and IP
+   serial that it prints its SoftAP SSID (`ESP32-Hub`) and IP
    (`192.168.4.1`).
 2. **Join the ESP32's Wi-Fi network** from the machine running the Python
    tooling (or route to it) so `192.168.4.1:1883` is reachable.

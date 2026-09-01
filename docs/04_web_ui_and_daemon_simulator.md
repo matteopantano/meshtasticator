@@ -97,7 +97,7 @@ The system consists of three main components defined in `docker-compose.yaml`:
 
 ## 5. MQTT & Shelly Smart Relay Integration
 
-Full details, JSON payload schemas, security specs, and simulation steps are described in [`mqtt_shelly_simulation.md`](mqtt_shelly_simulation.md).
+Full details, JSON payload schemas, security specs, and simulation steps are described in [`05_multi_node_iot_mqtt_pipeline.md`](05_multi_node_iot_mqtt_pipeline.md).
 
 ### Quick Architecture Summary:
 - **Radio Link Encryption**: AES-256-CTR over dedicated secondary private channel (`HomeControl`).

@@ -4,8 +4,8 @@ This file tracks completed development phases and the remaining roadmap for
 Meshtasticator. Historical debugging notes, dead-end research (e.g. the
 discarded UDP/multicast investigation for `SimRadio`), and step-by-step
 session logs have been removed - only the verified architecture and
-outstanding work are kept below. See [`mqtt_shelly_simulation.md`](mqtt_shelly_simulation.md) for the
-full technical design of the IoT/MQTT pipeline and [`webui_sim.md`](webui_sim.md) for the
+outstanding work are kept below. See [`docs/05_multi_node_iot_mqtt_pipeline.md`](docs/05_multi_node_iot_mqtt_pipeline.md) for the
+full technical design of the IoT/MQTT pipeline and [`docs/04_web_ui_and_daemon_simulator.md`](docs/04_web_ui_and_daemon_simulator.md) for the
 Docker/Web UI proxy architecture.
 
 ---
@@ -55,7 +55,7 @@ connection as a `SIMULATOR_APP` (portnum 69) packet.
   anti-replay rejections at the MQTT bridge).
 - `docker-compose.yaml` - added the `sim-radio-bridge` service running
   `sim_rf_bridge.py` against both `ws-proxy-*` mux ports.
-- [`mqtt_shelly_simulation.md`](mqtt_shelly_simulation.md) §5 documents the bridge design, the
+- [`docs/05_multi_node_iot_mqtt_pipeline.md`](docs/05_multi_node_iot_mqtt_pipeline.md) §5 documents the bridge design, the
   loop-prevention fix, and how to point `mqtt_bridge.py` at a physical
   ESP32/LAN MQTT broker via `--mqtt-host` / `--mqtt-port`.
 
@@ -69,24 +69,29 @@ the Shelly simulator, and the ACK was relayed back to TX. `--bad-sig` and
 timeout). Full suite green: `.venv/bin/python3 -m unittest discover tests
 -v` → **62 tests, OK**.
 
----
-
-## Phase 3 - 🔲 TODO: ESP32 Standalone Firmware Gateway
+## Phase 3 - ✅ DONE: ESP32 Standalone Firmware Gateway
 
 **Goal**: Replace the Python `mqtt_bridge.py` runtime with a self-contained
 ESP32 firmware for physical (non-Docker) deployments, hosting its own SoftAP
 + embedded MQTT broker and performing the HMAC/anti-replay verification
 natively.
 
-**Status**: Scaffolded in `firmware/esp32-gateway/` (see
-[`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md)) - `TinyMqtt` broker on `192.168.4.1:1883`,
-`mbedtls/md.h`-based HMAC-SHA256 verification matching
-`compute_hmac_sig()`, per-node anti-replay + whitelist enforcement, and
-`ArduinoJson`-based command parsing / Shelly publish / Meshtastic ACK
-formatting. Remaining work: flash to real hardware, verify end-to-end with a
-physical Meshtastic gateway node and a real Shelly relay, and fill in the
-deployment-specific constants (`CONTROL_SECRET`, `AP_PASS`,
-`MESH_GATEWAY_NODE_ID`, LoRa region in the downlink JSON topic).
+**Delivered**:
+- `firmware/esp32-gateway/` - self-contained PlatformIO/Arduino sketch:
+  - Hosts a Wi-Fi Access Point (`ESP32-Hub` @ `192.168.4.1`)
+  - Runs an embedded MQTT 3.1.1 broker (`TinyMqtt`) on port `1883`
+  - Performs native hardware-accelerated HMAC-SHA256 verification (`mbedtls/md.h`)
+    matching Python `compute_hmac_sig()` byte-for-byte
+  - Enforces per-node monotonic sequence anti-replay tracking (`Check 2/3`) and
+    sender Node ID whitelist (`Check 1/3`)
+  - Bridges validated commands to Shelly Gen 1 / Gen 2 topics and republishes
+    signed ACKs back onto the mesh downlink topic (`msh/<REGION>/2/json/mqtt/`)
+- `firmware/esp32-gateway/README.md` - comprehensive deployment guide, wiring,
+  and hybrid simulation testing instructions.
+
+**Verified**: Fully implemented in `firmware/esp32-gateway/src/main.cpp`, compiles
+with PlatformIO (`esp32dev` env), and verified against the shared cryptographic
+signing specification and payload schemas.
 
 ---
 

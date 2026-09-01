@@ -1,4 +1,4 @@
-# Real Hardware Deployment Guide: Meshtastic + ESP32 MQTT Hub + Shelly Smart Relay
+# Physical Hardware Deployment Guide: Meshtastic + ESP32 MQTT Hub + Shelly Smart Relay
 
 This guide details how to deploy the entire secure control pipeline on physical hardware without relying on computers or cloud services.
 
@@ -182,18 +182,20 @@ Instead of manually configuring each setting in the Web UI or typing dozens of C
 Plug your physical Meshtastic node into your computer via USB and run:
 
 ```bash
-# Provision Gateway Node (RX)
-.venv/bin/python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB0 --role rx --wifi-ssid "ESP32-Hub" --wifi-pass "YourSecureWifiPass123" --mqtt-host "192.168.4.1"
+# Provision Gateway Node (RX):
+# Connects to ESP32-Hub SoftAP and enables MQTT uplink to 192.168.4.1
+python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB0 --role rx
 
-# Provision Remote Transmitter (TX)
-.venv/bin/python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB1 --role tx
+# Provision Remote Transmitter (TX):
+# Connects to your Home/Lab Wi-Fi (WIFI_SSID_TX) for Web UI access without MQTT
+python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB1 --role tx
 ```
 
-This single command automatically:
+This automatically:
 1. Names the node (`Mesh RX Node` / `Mesh TX Node`).
-2. Configures the LoRa frequency region (`US`).
-3. Connects the node to the ESP32's Wi-Fi Access Point (`ESP32-Hub`).
-4. Configures and enables the native Meshtastic MQTT client pointing to the ESP32 (`192.168.4.1:1883`).
+2. Configures the LoRa frequency region (`LORA_REGION` from `.env`).
+3. **For RX Gateway**: Connects to the ESP32 Hub Wi-Fi (`WIFI_SSID_RX="ESP32-Hub"`) and enables native Meshtastic MQTT client pointing to the ESP32 (`192.168.4.1:1883`).
+4. **For Remote TX**: Connects to your local Wi-Fi (`WIFI_SSID_TX="YourHomeWifi"`) so you can access its Web UI from your phone/browser on your home network, while leaving MQTT disabled (communication travels strictly over LoRa).
 
 ---
 
@@ -201,17 +203,23 @@ This single command automatically:
 If you prefer manual configuration:
 
 ```bash
-# 1. Enable Wi-Fi client and connect to ESP32-Hub
-meshtastic --set network.wifi_enabled true \
+# 1. RX Gateway Node: Connect to ESP32-Hub and enable MQTT
+meshtastic --port /dev/ttyUSB0 \
+           --set network.wifi_enabled true \
            --set network.wifi_ssid "ESP32-Hub" \
-           --set network.wifi_psk "YourSecureWifiPass123"
-
-# 2. Configure MQTT client to publish to ESP32 broker
-meshtastic --set mqtt.enabled true \
+           --set network.wifi_psk "YourSecureWifiPass123" \
+           --set mqtt.enabled true \
            --set mqtt.address "192.168.4.1" \
            --set mqtt.json_enabled true \
            --set mqtt.encryption_enabled false \
            --set mqtt.root "msh"
+
+# 2. Remote TX Node: Connect to your Home/Lab Wi-Fi for Web UI access
+meshtastic --port /dev/ttyUSB1 \
+           --set network.wifi_enabled true \
+           --set network.wifi_ssid "YourHomeWifi" \
+           --set network.wifi_psk "YourHomeWifiPassword" \
+           --set mqtt.enabled false
 ```
 
 ---

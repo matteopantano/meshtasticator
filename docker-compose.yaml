@@ -6,7 +6,7 @@ services:
     image: meshtastic/meshtasticd:latest
     container_name: meshtasticd-rx
     restart: unless-stopped
-    command: ["meshtasticd", "-s", "-c", "/etc/meshtasticd/config.yaml"]
+    command: [ "meshtasticd", "-s", "-c", "/etc/meshtasticd/config.yaml" ]
     volumes:
       - ./meshtasticd-config/config.yaml:/etc/meshtasticd/config.yaml:ro
       - meshtasticd-data-rx:/root/.portduino
@@ -24,8 +24,8 @@ services:
     volumes:
       - ./meshtasticd-config/proxy.py:/app/proxy.py:ro
     ports:
-      - "4403:4403"
-      - "4404:4404"
+      - "4403:4403" # web interface
+      - "4404:4404" # websocket API
     depends_on:
       - meshtasticd-rx
     networks:
@@ -38,7 +38,7 @@ services:
     image: meshtastic/meshtasticd:latest
     container_name: meshtasticd-tx
     restart: unless-stopped
-    command: ["meshtasticd", "-s", "-c", "/etc/meshtasticd/config.yaml"]
+    command: [ "meshtasticd", "-s", "-c", "/etc/meshtasticd/config.yaml" ]
     volumes:
       - ./meshtasticd-config/config.yaml:/etc/meshtasticd/config.yaml:ro
       - meshtasticd-data-tx:/root/.portduino
@@ -56,8 +56,8 @@ services:
     volumes:
       - ./meshtasticd-config/proxy.py:/app/proxy.py:ro
     ports:
-      - "4405:4403"
-      - "4406:4404"
+      - "4405:4403" # web interface
+      - "4406:4404" # websocket API
     depends_on:
       - meshtasticd-tx
     networks:

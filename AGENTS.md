@@ -23,14 +23,14 @@ Meshtasticator/
 ├── requirements.txt               # Python package dependencies
 ├── .env.example                   # Environment configuration template
 ├── README.md                      # Main project entrypoint and quick reference
+├── ROADMAP.md                     # Project status, verification notes, and roadmap
 │
 ├── docs/                          # Detailed architecture & feature documentation
-│   ├── discrete_event_sim.md      # Python radio-layer discrete event simulator
-│   ├── interactive_sim.md         # Interactive multi-process native binary simulator
-│   ├── webui_sim.md               # Web UI & Docker meshtasticd architecture
-│   ├── mqtt_shelly_simulation.md  # Payload specification, security checks, and simulator documentation
-│   ├── hardware_deployment_guide.md # Physical ESP32 + Meshtastic + Shelly deployment guide
-│   └── resume_plan.md             # Project status, verification notes, and roadmap
+│   ├── 01_discrete_event_radio_simulator.md   # Python radio-layer discrete event simulator
+│   ├── 03_interactive_multi_node_simulator.md # Interactive multi-process native binary simulator
+│   ├── 04_web_ui_and_daemon_simulator.md      # Web UI & Docker meshtasticd architecture
+│   ├── 05_multi_node_iot_mqtt_pipeline.md     # Payload specification, security checks, and simulator documentation
+│   └── 07_physical_hardware_deployment.md     # Physical ESP32 + Meshtastic + Shelly deployment guide
 │
 ├── firmware/
 │   └── esp32-gateway/             # Standalone ESP32 C++ Gateway (SoftAP + TinyMqtt + native HMAC)

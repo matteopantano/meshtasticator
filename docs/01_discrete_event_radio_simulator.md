@@ -1,6 +1,6 @@
-# Discrete-Event Simulator
+# Discrete-Event Radio Simulator
 
-The discrete-event simulator mimics the radio section of the device software. It is currently based on Meshtastic 2.1.
+The discrete-event simulator mimics the LoRa radio section of the device software. It is currently based on Meshtastic 2.1.
 
 ## Usage
 Please `git clone` or download this repository, navigate to the Meshtasticator folder (optionally create a virtual environment) and install the necessary requirements using:

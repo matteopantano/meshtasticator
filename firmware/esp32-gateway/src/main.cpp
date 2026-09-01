@@ -21,7 +21,7 @@
  * See `firmware/esp32-gateway/README.md` for wiring, library dependencies,
  * flashing instructions, and how to connect a real Shelly relay.
  *
- * See `docs/mqtt_shelly_simulation.md` for the full protocol/security spec that
+ * See `docs/05_multi_node_iot_mqtt_pipeline.md` for the full protocol/security spec that
  * this firmware implements (payload schema, HMAC vector, topics).
  */
 
@@ -32,43 +32,52 @@
 #include "mbedtls/md.h"     // Native ESP32 hardware-accelerated HMAC-SHA256
 
 // ============================================================
-// --- CONFIGURATION (edit these for your deployment) ---
+// --- CONFIGURATION (Loaded dynamically from .env via load_env.py) ---
 // ============================================================
 
-// Wi-Fi SoftAP credentials. Devices (the Meshtastic gateway node, and the
-// Shelly relay) must join this network to reach the embedded MQTT broker.
-static const char* AP_SSID = "Mesh-Gateway";
-static const char* AP_PASS = "YourSecureWifiPass123";  // >= 8 chars, WPA2
+#ifndef AP_SSID
+#define AP_SSID "ESP32-Hub"
+#endif
+
+#ifndef AP_PASS
+#define AP_PASS "YourSecureWifiPass123"
+#endif
+
+#ifndef CONTROL_SECRET
+#define CONTROL_SECRET "MeshShellySecret2026"
+#endif
+
+#ifndef MESH_LORA_REGION
+#define MESH_LORA_REGION "US"
+#endif
+
+#ifndef MESH_GATEWAY_NODE_ID
+#define MESH_GATEWAY_NODE_ID 0x00000000
+#endif
+
+// Wi-Fi SoftAP credentials (injected from .env WIFI_SSID / WIFI_PASS).
+static const char* AP_SSID_STR = AP_SSID;
+static const char* AP_PASS_STR = AP_PASS;
 
 // Static AP IP. 192.168.4.1 is the ESP32 SoftAP default and is assumed
-// throughout docs/mqtt_shelly_simulation.md / docs/hardware_deployment_guide.md.
+// throughout docs/05_multi_node_iot_mqtt_pipeline.md / docs/07_physical_hardware_deployment.md.
 static const IPAddress AP_IP(192, 168, 4, 1);
 static const IPAddress AP_GATEWAY(192, 168, 4, 1);
 static const IPAddress AP_SUBNET(255, 255, 255, 0);
 
 static const uint16_t MQTT_PORT = 1883;
 
-// Shared HMAC-SHA256 secret. MUST exactly match `CONTROL_SECRET` used by
-// `meshtasticd-config/mqtt_bridge.py` / `send_control_cmd.py` (see `.env`).
-// NEVER commit a real production secret to a public repository.
-static const char* CONTROL_SECRET = "MeshShellySecret2026";
+// Shared HMAC-SHA256 secret (injected from .env CONTROL_SECRET).
+static const char* CONTROL_SECRET_STR = CONTROL_SECRET;
 
-// Decimal Meshtastic Node ID of the physical gateway node that is
-// Wi-Fi/MQTT-connected to this ESP32 (i.e. the node whose native
-// `mqtt.*` client publishes/subscribes to this broker). Required as the
-// `from` field when this firmware re-publishes a signed ACK onto the mesh
-// via the JSON downlink topic. Find it via `meshtastic --info` (decimal
-// form of the `!xxxxxxxx` Node ID).
-static const uint32_t MESH_GATEWAY_NODE_ID = 0x00000000; // <-- SET ME
+// Decimal Meshtastic Node ID of the physical gateway node.
+static const uint32_t MESH_GATEWAY_NODE_ID_VAL = MESH_GATEWAY_NODE_ID;
 
 // Meshtastic MQTT root topic and JSON "channel" name used for downlink
-// (MQTT -> mesh) messages. Per the Meshtastic MQTT integration docs, a
-// dedicated channel literally named "mqtt" is used for the JSON downlink
-// topic: `<root>/2/json/mqtt/`. The uplink (mesh -> MQTT) topic uses the
-// real channel name(s) configured on the gateway node, so we subscribe
-// with a wildcard to catch all of them.
+// (MQTT -> mesh) messages.
 static const char* MESH_ROOT = "msh";
 static const char* MESH_DOWNLINK_CHANNEL = "mqtt";
+static const char* MESH_LORA_REGION_STR = MESH_LORA_REGION;
 
 // Sender Node ID whitelist (Check 1/3). Use {"*"} to allow any sender
 // (development/simulation only - NOT recommended for production). In
@@ -286,9 +295,7 @@ String decimalNodeIdToHex(uint32_t nodeId) {
 // named "mqtt" (downlink enabled) will forward a JSON envelope published
 // to `msh/<REGION>/2/json/mqtt/` onto the mesh as a text message. See
 // https://meshtastic.org/docs/software/integrations/mqtt/ and
-// docs/mqtt_shelly_simulation.md for the exact envelope fields.
-static const char* MESH_LORA_REGION = "US"; // must match the gateway node's configured region
-
+// docs/05_multi_node_iot_mqtt_pipeline.md for the exact envelope fields.
 void sendMeshAck(uint32_t toNodeIdDecimal, const String& target, const String& state, long seq) {
   JsonDocument ackDoc;
   ackDoc["ver"] = 1;
@@ -300,7 +307,7 @@ void sendMeshAck(uint32_t toNodeIdDecimal, const String& target, const String& s
   serializeJson(ackDoc, ackJson);
 
   JsonDocument envelope;
-  envelope["from"] = MESH_GATEWAY_NODE_ID;
+  envelope["from"] = MESH_GATEWAY_NODE_ID_VAL;
   envelope["to"] = toNodeIdDecimal;
   envelope["type"] = "sendtext";
   envelope["payload"] = ackJson;

@@ -7,13 +7,13 @@ A comprehensive simulation, testbed, and IoT-integration suite for
 
 | # | Capability | Quickstart | Full docs |
 | :-- | :-- | :-- | :-- |
-| 1 | 📡 **Discrete-Event Radio Simulator** — Python radio-layer simulation for mesh performance, reachability & scalability analysis | [Jump to §1](#-1-discrete-event-radio-simulator) | [docs/discrete_event_sim.md](docs/discrete_event_sim.md) |
+| 1 | 📡 **Discrete-Event Radio Simulator** — Python radio-layer simulation for mesh performance, reachability & scalability analysis | [Jump to §1](#-1-discrete-event-radio-simulator) | [docs/01_discrete_event_radio_simulator.md](docs/01_discrete_event_radio_simulator.md) |
 | 2 | 📊 **Batch Simulation & Metrics** — run many simulations across parameter sweeps and plot results | [Jump to §2](#-2-batch-simulation--scalability-metrics) | [`batchSim.py`](batchSim.py), [`plotExample.py`](plotExample.py) |
-| 3 | 🖥️ **Interactive Multi-Node Simulator** — runs real Meshtastic native binaries as separate processes over simulated LoRa links | [Jump to §3](#-3-interactive-multi-node-simulator) | [docs/interactive_sim.md](docs/interactive_sim.md) |
-| 4 | 🌐 **Web UI & Daemon Simulator** — Dockerized `meshtasticd` + official `meshtastic-web` client | [Jump to §4](#-4-web-ui--daemon-simulator-meshtasticd--meshtastic-web) | [docs/webui_sim.md](docs/webui_sim.md) |
-| 5 | 🔗 **Multi-Node Docker Testbed & IoT/MQTT Pipeline** — two-node mesh + secure Meshtastic ➔ MQTT ➔ Shelly relay control | [Jump to §5](#-5-multi-node-testbed--iotmqtt-integration) | [docs/mqtt_shelly_simulation.md](docs/mqtt_shelly_simulation.md) |
+| 3 | 🖥️ **Interactive Multi-Node Simulator** — runs real Meshtastic native binaries as separate processes over simulated LoRa links | [Jump to §3](#-3-interactive-multi-node-simulator) | [docs/03_interactive_multi_node_simulator.md](docs/03_interactive_multi_node_simulator.md) |
+| 4 | 🌐 **Web UI & Daemon Simulator** — Dockerized `meshtasticd` + official `meshtastic-web` client | [Jump to §4](#-4-web-ui--daemon-simulator-meshtasticd--meshtastic-web) | [docs/04_web_ui_and_daemon_simulator.md](docs/04_web_ui_and_daemon_simulator.md) |
+| 5 | 🔗 **Multi-Node Docker Testbed & IoT/MQTT Pipeline** — two-node mesh + secure Meshtastic ➔ MQTT ➔ Shelly relay control | [Jump to §5](#-5-multi-node-testbed--iotmqtt-integration) | [docs/05_multi_node_iot_mqtt_pipeline.md](docs/05_multi_node_iot_mqtt_pipeline.md) |
 | 6 | 🔌 **Standalone ESP32 Gateway Firmware** — replaces the Python MQTT bridge on real hardware (SoftAP + embedded broker + native HMAC) | [Jump to §6](#-6-standalone-esp32-gateway-firmware) | [firmware/esp32-gateway/README.md](firmware/esp32-gateway/README.md) |
-| 7 | 🔧 **Physical Hardware Deployment** — deploy the whole pipeline on real Meshtastic nodes + ESP32 + Shelly, zero cloud/computer required | [Jump to §7](#-7-physical-hardware-deployment) | [docs/hardware_deployment_guide.md](docs/hardware_deployment_guide.md) |
+| 7 | 🔧 **Physical Hardware Deployment** — deploy the whole pipeline on real Meshtastic nodes + ESP32 + Shelly, zero cloud/computer required | [Jump to §7](#-7-physical-hardware-deployment) | [docs/07_physical_hardware_deployment.md](docs/07_physical_hardware_deployment.md) |
 | 8 | 🧪 **Test Suite** — 62 unit tests covering the simulator core and the IoT security pipeline | [Jump to §8](#-8-tests--environment-setup) | [`tests/`](tests/) |
 
 ---
@@ -44,7 +44,7 @@ Generates visual plots of node placement and overlapping packet schedules.
 ![](img/placement_schedule.png)
 
 - **Full usage guide** (custom modem/pathloss/period configs, `--from-file`
-  replay, etc.): [docs/discrete_event_sim.md](docs/discrete_event_sim.md)
+  replay, etc.): [docs/01_discrete_event_radio_simulator.md](docs/01_discrete_event_radio_simulator.md)
 
 ---
 
@@ -89,7 +89,7 @@ Then send commands interactively, e.g. `broadcast 0 "hello mesh"`,
 ![](img/route_plot2.png)
 
 - **Full usage guide** (all commands, scripted mode, pathloss models):
-  [docs/interactive_sim.md](docs/interactive_sim.md)
+  [docs/03_interactive_multi_node_simulator.md](docs/03_interactive_multi_node_simulator.md)
 
 ---
 
@@ -137,41 +137,55 @@ Run the official native C++ Meshtastic daemon (`meshtasticd`) in simulation mode
    .venv/bin/meshtastic --host localhost:4404 --set lora.region US
    ```
 
-- **Detailed Technical Guide**: See [docs/webui_sim.md](docs/webui_sim.md) for proxy framing details and architecture notes.
+- **Detailed Technical Guide**: See [docs/04_web_ui_and_daemon_simulator.md](docs/04_web_ui_and_daemon_simulator.md) for proxy framing details and architecture notes.
 
 ---
 
 ## 🔗 5. Multi-Node Testbed & IoT/MQTT Integration
 
-`docker-compose.yaml` also runs a **two-node mesh testbed** (`meshtasticd-rx` +
+`docker-compose.yaml` runs a full **two-node simulated mesh testbed** (`meshtasticd-rx` +
 `meshtasticd-tx`, each with its own `ws-proxy`/Web UI) bridged by a
-simulated RF cross-routing service (`sim-radio-bridge`), plus a Mosquitto
+simulated RF cross-routing service (`sim-radio-bridge`), plus an embedded Mosquitto
 MQTT broker. This demonstrates and tests a secure Meshtastic ➔ MQTT ➔
 Shelly smart-relay control pipeline: HMAC-SHA256 signed commands,
 anti-replay (monotonic sequence) protection, and sender-Node-ID
 whitelisting.
 
-### Quickstart
-```bash
-# 1. Launch the full stack (2 mesh nodes, RF bridge, MQTT broker, Web UIs):
-cp .env.example .env
-docker compose up -d
+> [!IMPORTANT]
+> **Prerequisites**: Make sure your Python virtual environment is activated (`source .venv/bin/activate`) and the Docker stack is running before provisioning nodes or running Python bridges.
 
-# 2. Auto-provision both simulated nodes (names, region, native MQTT client):
-.venv/bin/python3 meshtasticd-config/provision_nodes.py --sim
+### Step-by-Step Quickstart
 
-# 3. In separate terminals, start the Shelly simulator and the security bridge:
-.venv/bin/python3 meshtasticd-config/shelly_simulator.py --id shelly1-sim01
-.venv/bin/python3 meshtasticd-config/mqtt_bridge.py --mesh-port 4404
+1. **Copy Environment & Start the Docker Multi-Node Stack**:
+   ```bash
+   cp .env.example .env
+   docker compose up -d
+   ```
+   *(This launches both mesh nodes on ports `4404`/`4406`, the RF bridge, the MQTT broker on `1883`, and Web UIs on `http://localhost:8080` & `http://localhost:8081`)*
 
-# 4. Send a signed control command from the TX node and watch the ACK:
-.venv/bin/python3 meshtasticd-config/send_control_cmd.py \
-  --mesh-port 4406 --target shelly1-sim01 --action ON
-```
-Web UIs: RX node at `http://localhost:8080`, TX node at `http://localhost:8081`.
+2. **Auto-Provision the Simulated Mesh Nodes**:
+   ```bash
+   python3 meshtasticd-config/provision_nodes.py --sim
+   ```
+   *(Sets node owners, LoRa regions, and native MQTT client pointing to the broker)*
 
-- **Full pipeline design, security spec, and hybrid-hardware testing
-  guide**: see [docs/mqtt_shelly_simulation.md](docs/mqtt_shelly_simulation.md).
+3. **Start the Shelly Relay Simulator & Meshtastic-to-MQTT Bridge** (in separate terminals):
+   ```bash
+   # Terminal 1 - Run Shelly smart relay emulator:
+   python3 meshtasticd-config/shelly_simulator.py --id shelly1-sim01
+
+   # Terminal 2 - Run Meshtastic-to-MQTT security bridge:
+   python3 meshtasticd-config/mqtt_bridge.py --mesh-port 4404
+   ```
+
+4. **Send a Signed Control Command from the TX Node**:
+   ```bash
+   python3 meshtasticd-config/send_control_cmd.py \
+     --mesh-port 4406 --target shelly1-sim01 --action ON
+   ```
+   *(Watch the RF bridge relay the packet from TX to RX, verify HMAC & sequence, publish to MQTT, toggle the Shelly relay, and relay the signed status ACK back to TX!)*
+
+- **Full pipeline design, security spec, and hybrid-hardware testing guide**: see [docs/05_multi_node_iot_mqtt_pipeline.md](docs/05_multi_node_iot_mqtt_pipeline.md).
 
 ---
 
@@ -201,25 +215,22 @@ pio device monitor       # serial monitor at 115200 baud
 
 Deploy the entire secure control pipeline on real Meshtastic radios, an
 ESP32 hub, and a real Shelly relay — with **zero cloud services and zero
-computer required at runtime** once provisioned.
+computer required at runtime**: it hosts its own Wi-Fi SoftAP (`ESP32-Hub` @
+`192.168.4.1`), runs an embedded `TinyMqtt` broker on port `1883`, and
+executes the HMAC-SHA256 signature verification directly in C++ on the
+microcontroller.
 
-### Quickstart
+Provision an RX node over USB to join the ESP32 Hub:
 ```bash
-# 1. Flash firmware/esp32-gateway/ to your ESP32 hub (see §6 above).
-
-# 2. Provision your physical Meshtastic nodes over USB in one command each:
-.venv/bin/python3 meshtasticd-config/provision_nodes.py \
-  --serial /dev/ttyUSB0 --role rx --wifi-ssid "Mesh-Gateway" \
+python3 meshtasticd-config/provision_nodes.py \
+  --serial /dev/ttyUSB0 --role rx --wifi-ssid "ESP32-Hub" \
   --wifi-pass "YourSecureWifiPass123" --mqtt-host "192.168.4.1"
-
-.venv/bin/python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB1 --role tx
-
-# 3. Join a real Shelly relay to the ESP32's Wi-Fi and point its MQTT
-#    client at 192.168.4.1:1883 (see the full guide for exact steps).
 ```
 
+3. **Connect Shelly Relay**: Join a real Shelly relay to the ESP32's Wi-Fi (`ESP32-Hub`) and point its MQTT client at `192.168.4.1:1883`.
+
 - **Full bill of materials, wiring diagram, and step-by-step guide**: see
-  [docs/hardware_deployment_guide.md](docs/hardware_deployment_guide.md).
+  [docs/07_physical_hardware_deployment.md](docs/07_physical_hardware_deployment.md).
 
 ---
 

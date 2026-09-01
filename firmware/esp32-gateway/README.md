@@ -6,10 +6,10 @@ non-Docker deployments**. A single ESP32 hosts its own Wi-Fi Access Point,
 an embedded MQTT broker, and performs the same Zero-Trust HMAC-SHA256 +
 anti-replay + whitelist security pipeline natively in C++.
 
-See [`docs/mqtt_shelly_simulation.md`](../../docs/mqtt_shelly_simulation.md) at the
+See [`docs/05_multi_node_iot_mqtt_pipeline.md`](../../docs/05_multi_node_iot_mqtt_pipeline.md) at the
 repository root for the full protocol/security specification this firmware
 implements, and
-[`docs/hardware_deployment_guide.md`](../../docs/hardware_deployment_guide.md) for the
+[`docs/07_physical_hardware_deployment.md`](../../docs/07_physical_hardware_deployment.md) for the
 end-to-end physical deployment (Meshtastic nodes + ESP32 + Shelly).
 
 ---
@@ -17,7 +17,7 @@ end-to-end physical deployment (Meshtastic nodes + ESP32 + Shelly).
 ## 1. What this firmware does
 
 1. **Networking (SoftAP mode)**: Configures the ESP32 as a Wi-Fi Access
-   Point (SSID `Mesh-Gateway`, default IP `192.168.4.1`) and starts an
+   Point (SSID `ESP32-Hub`, default IP `192.168.4.1`) and starts an
    embedded MQTT 3.1.1 broker (`TinyMqtt`) on port `1883`. Both the physical
    Meshtastic gateway node (its native `mqtt.*` client) and a Shelly smart
    relay connect to this broker over Wi-Fi - no internet, no external
@@ -82,24 +82,23 @@ PlatformIO will automatically fetch `TinyMqtt` and `ArduinoJson` per the
 
 ---
 
-## 4. Configuration
+## 4. Single Source of Truth Configuration (`.env`)
 
-Before flashing, edit the constants at the top of `src/main.cpp`:
+When building with PlatformIO, configuration parameters are **automatically loaded directly from the repository's root `.env` file** at compile time via `load_env.py`. This ensures your Wi-Fi credentials, HMAC secret, and LoRa region are maintained in **one place only**:
 
-| Constant | Purpose | Default |
-| :--- | :--- | :--- |
-| `AP_SSID` / `AP_PASS` | SoftAP Wi-Fi credentials | `Mesh-Gateway` / `YourSecureWifiPass123` |
-| `CONTROL_SECRET` | Shared HMAC-SHA256 secret - **must exactly match** `CONTROL_SECRET` used by `mqtt_bridge.py` / `send_control_cmd.py` (see the repository root `.env`) | `MeshShellySecret2026` |
-| `MESH_GATEWAY_NODE_ID` | Decimal Node ID of the physical Meshtastic gateway node connected to this ESP32's Wi-Fi/MQTT (used as the `from` field when publishing ACKs) | `0x00000000` (**must be set**) |
-| `ALLOWED_NODES` | Whitelist of sender Node IDs (hex `!xxxxxxxx` form) allowed to issue commands. Use `{"*"}` for simulation/dev only | `{"*"}` |
-| `MESH_LORA_REGION` | Must match the gateway node's configured LoRa region (used in the JSON topic `msh/<REGION>/2/json/...`) | `"US"` |
+| `.env` Key | C++ Macro | Default / Fallback | Purpose |
+| :--- | :--- | :--- | :--- |
+| `WIFI_SSID` | `AP_SSID` | `"ESP32-Hub"` | SoftAP Wi-Fi SSID |
+| `WIFI_PASS` | `AP_PASS` | `"YourSecureWifiPass123"` | SoftAP Wi-Fi Password |
+| `CONTROL_SECRET` | `CONTROL_SECRET` | `"MeshShellySecret2026"` | Shared HMAC-SHA256 Secret |
+| `LORA_REGION` | `MESH_LORA_REGION` | `"US"` | Meshtastic LoRa Region |
+| `GATEWAY_NODE_ID` | `MESH_GATEWAY_NODE_ID` | `0x00000000` | Decimal/Hex Node ID of Gateway Node |
+
+> [!TIP]
+> You only need to set these once in `.env`. Both the Python scripts (`provision_nodes.py`, `mqtt_bridge.py`, `send_control_cmd.py`) and the ESP32 firmware build (`pio run`) will automatically use the exact same values!
 
 > [!IMPORTANT]
-> Never commit a real production `CONTROL_SECRET` or Wi-Fi password to a
-> public repository. This scaffold ships with the same development
-> defaults used elsewhere in this repo's simulation tooling
-> (`.env.example`) purely for out-of-the-box interoperability during
-> testing - replace them before any real deployment.
+> Never commit a real production `.env`, `CONTROL_SECRET`, or Wi-Fi password to a public repository. `.env` is ignored by git, while `.env.example` provides safe development defaults.
 
 ---
 
@@ -110,7 +109,7 @@ this ESP32 to join its SoftAP and use its native MQTT client:
 
 ```bash
 meshtastic --set network.wifi_enabled true \
-           --set network.wifi_ssid "Mesh-Gateway" \
+           --set network.wifi_ssid "ESP32-Hub" \
            --set network.wifi_psk "YourSecureWifiPass123"
 
 meshtastic --set mqtt.enabled true \
@@ -130,7 +129,7 @@ meshtastic --ch-index <new-channel-index> --ch-set downlink_enabled true
 
 Or use the repository's automated provisioner (see
 `meshtasticd-config/provision_nodes.py` and
-[`docs/hardware_deployment_guide.md`](../../docs/hardware_deployment_guide.md) §4).
+[`docs/07_physical_hardware_deployment.md`](../../docs/07_physical_hardware_deployment.md) §4).
 
 ---
 
@@ -138,7 +137,7 @@ Or use the repository's automated provisioner (see
 
 1. Power the Shelly on and join its setup Wi-Fi (`Shelly1-XXXXXX`).
 2. Browse to `http://192.168.33.1/` and configure **Wi-Fi Mode - Client**
-   with SSID `Mesh-Gateway` / your `AP_PASS`.
+   with SSID `ESP32-Hub` / your `AP_PASS`.
 3. Configure **MQTT** (Advanced ➔ Developer Settings on Gen 1, or
    Settings ➔ MQTT on Gen 2/Plus):
    - **Enable MQTT**: checked
@@ -158,7 +157,7 @@ signed ACK back to the sender.
 
 You do not need a physical Meshtastic node to validate this firmware's MQTT
 broker and security logic - see **§6 "Hybrid Testing"** in
-[`docs/mqtt_shelly_simulation.md`](../../docs/mqtt_shelly_simulation.md) for
+[`docs/05_multi_node_iot_mqtt_pipeline.md`](../../docs/05_multi_node_iot_mqtt_pipeline.md) for
 instructions on pointing the repository's Docker-based simulated mesh
 (`meshtasticd-rx`/`tx` + `sim-radio-bridge`) and `shelly_simulator.py` at
 this ESP32's broker on `192.168.4.1:1883`.

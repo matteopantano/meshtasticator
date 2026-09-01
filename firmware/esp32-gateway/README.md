@@ -6,10 +6,10 @@ non-Docker deployments**. A single ESP32 hosts its own Wi-Fi Access Point,
 an embedded MQTT broker, and performs the same Zero-Trust HMAC-SHA256 +
 anti-replay + whitelist security pipeline natively in C++.
 
-See [`MQTT_SHELLY_SIMULATION.md`](../../MQTT_SHELLY_SIMULATION.md) at the
+See [`docs/mqtt_shelly_simulation.md`](../../docs/mqtt_shelly_simulation.md) at the
 repository root for the full protocol/security specification this firmware
 implements, and
-[`HARDWARE_DEPLOYMENT_GUIDE.md`](../../HARDWARE_DEPLOYMENT_GUIDE.md) for the
+[`docs/hardware_deployment_guide.md`](../../docs/hardware_deployment_guide.md) for the
 end-to-end physical deployment (Meshtastic nodes + ESP32 + Shelly).
 
 ---
@@ -130,7 +130,7 @@ meshtastic --ch-index <new-channel-index> --ch-set downlink_enabled true
 
 Or use the repository's automated provisioner (see
 `meshtasticd-config/provision_nodes.py` and
-[`HARDWARE_DEPLOYMENT_GUIDE.md`](../../HARDWARE_DEPLOYMENT_GUIDE.md) §4).
+[`docs/hardware_deployment_guide.md`](../../docs/hardware_deployment_guide.md) §4).
 
 ---
 
@@ -158,7 +158,7 @@ signed ACK back to the sender.
 
 You do not need a physical Meshtastic node to validate this firmware's MQTT
 broker and security logic - see **§6 "Hybrid Testing"** in
-[`MQTT_SHELLY_SIMULATION.md`](../../MQTT_SHELLY_SIMULATION.md) for
+[`docs/mqtt_shelly_simulation.md`](../../docs/mqtt_shelly_simulation.md) for
 instructions on pointing the repository's Docker-based simulated mesh
 (`meshtasticd-rx`/`tx` + `sim-radio-bridge`) and `shelly_simulator.py` at
 this ESP32's broker on `192.168.4.1:1883`.

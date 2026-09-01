@@ -118,7 +118,7 @@ logic.
      legitimate command.
    - The ESP32 firmware performs the equivalent computation natively via
      `mbedtls/md.h`'s `mbedtls_md_hmac_*` API (see
-     `firmware/esp32-gateway/src/main.cpp`), producing byte-identical
+     [`firmware/esp32-gateway/src/main.cpp`](../firmware/esp32-gateway/src/main.cpp)), producing byte-identical
      results to the Python implementation for the same secret/inputs.
 
 Only once all three checks pass does the gateway publish the command to the
@@ -210,7 +210,7 @@ toggled the Shelly simulator, and the ACK was relayed back to TX, printing
 `🎉 Status ACK Received via Meshtastic!`. The `--bad-sig` and `--replay`
 flags were also confirmed to be silently dropped by the gateway (no ACK,
 timeout message printed), and the existing test suite
-(`python3 -m unittest discover tests -v`) remained green (62/62) since the
+(`.venv/bin/python3 -m unittest discover tests -v`) remained green (62/62) since the
 bridge lives entirely in `meshtasticd-config/` and requires Docker/
 `meshtastic` only at runtime, not at test-collection time.
 
@@ -247,7 +247,7 @@ physical Meshtastic radio hardware.
 
 1. **Flash and power on the ESP32** running
    `firmware/esp32-gateway/src/main.cpp` (see
-   `firmware/esp32-gateway/README.md` for flashing steps). Confirm over
+   [`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) for flashing steps). Confirm over
    serial that it prints its SoftAP SSID (`Mesh-Gateway`) and IP
    (`192.168.4.1`).
 2. **Join the ESP32's Wi-Fi network** from the machine running the Python
@@ -267,7 +267,7 @@ physical Meshtastic radio hardware.
    ```
    (Or skip this step entirely and connect a **real Shelly** to
    `192.168.4.1:1883` as described in
-   `firmware/esp32-gateway/README.md` §"Connecting a Real Shelly".)
+   [`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) §"Connecting a Real Shelly".)
 5. **Send a signed command through the simulated mesh** with
    `send_control_cmd.py` exactly as in the fully-simulated flow (the
    ESP32 only needs to be reachable as the MQTT broker; the mesh transport

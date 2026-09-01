@@ -21,7 +21,7 @@
  * See `firmware/esp32-gateway/README.md` for wiring, library dependencies,
  * flashing instructions, and how to connect a real Shelly relay.
  *
- * See `MQTT_SHELLY_SIMULATION.md` for the full protocol/security spec that
+ * See `docs/mqtt_shelly_simulation.md` for the full protocol/security spec that
  * this firmware implements (payload schema, HMAC vector, topics).
  */
 
@@ -41,7 +41,7 @@ static const char* AP_SSID = "Mesh-Gateway";
 static const char* AP_PASS = "YourSecureWifiPass123";  // >= 8 chars, WPA2
 
 // Static AP IP. 192.168.4.1 is the ESP32 SoftAP default and is assumed
-// throughout MQTT_SHELLY_SIMULATION.md / HARDWARE_DEPLOYMENT_GUIDE.md.
+// throughout docs/mqtt_shelly_simulation.md / docs/hardware_deployment_guide.md.
 static const IPAddress AP_IP(192, 168, 4, 1);
 static const IPAddress AP_GATEWAY(192, 168, 4, 1);
 static const IPAddress AP_SUBNET(255, 255, 255, 0);
@@ -286,7 +286,7 @@ String decimalNodeIdToHex(uint32_t nodeId) {
 // named "mqtt" (downlink enabled) will forward a JSON envelope published
 // to `msh/<REGION>/2/json/mqtt/` onto the mesh as a text message. See
 // https://meshtastic.org/docs/software/integrations/mqtt/ and
-// MQTT_SHELLY_SIMULATION.md for the exact envelope fields.
+// docs/mqtt_shelly_simulation.md for the exact envelope fields.
 static const char* MESH_LORA_REGION = "US"; // must match the gateway node's configured region
 
 void sendMeshAck(uint32_t toNodeIdDecimal, const String& target, const String& state, long seq) {

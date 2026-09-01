@@ -19,17 +19,27 @@ This repository is **Meshtasticator**: a multi-node simulator, real-time web UI,
 
 ```
 Meshtasticator/
-├── docker-compose.yaml             # Docker multi-container stack (RX, TX, ws-proxies, web UI, mosquitto)
+├── docker-compose.yaml             # Docker multi-container stack (RX, TX, RF bridge, ws-proxies, web UI, mosquitto)
 ├── requirements.txt               # Python package dependencies
 ├── .env.example                   # Environment configuration template
-├── CLAUDE.md                      # Comprehensive architecture, root cause analysis & networking details
-├── MQTT_SHELLY_SIMULATION.md      # Payload specification, security checks, and simulator documentation
-├── HARDWARE_DEPLOYMENT_GUIDE.md   # Standalone ESP32 + Meshtastic + Shelly physical hardware setup
+├── README.md                      # Main project entrypoint and quick reference
+│
+├── docs/                          # Detailed architecture & feature documentation
+│   ├── discrete_event_sim.md      # Python radio-layer discrete event simulator
+│   ├── interactive_sim.md         # Interactive multi-process native binary simulator
+│   ├── webui_sim.md               # Web UI & Docker meshtasticd architecture
+│   ├── mqtt_shelly_simulation.md  # Payload specification, security checks, and simulator documentation
+│   ├── hardware_deployment_guide.md # Physical ESP32 + Meshtastic + Shelly deployment guide
+│   └── resume_plan.md             # Project status, verification notes, and roadmap
+│
+├── firmware/
+│   └── esp32-gateway/             # Standalone ESP32 C++ Gateway (SoftAP + TinyMqtt + native HMAC)
 │
 ├── meshtasticd-config/
 │   ├── config.yaml                # meshtasticd configuration (LoRa region US, generated MAC)
 │   ├── mosquitto.conf             # Mosquitto MQTT broker configuration
 │   ├── proxy.py                   # Tornado WebSocket / HTTP to meshtasticd TCP bridge + TCP mux (port 4404)
+│   ├── sim_rf_bridge.py           # Simulated RF cross-routing bridge between simulated nodes
 │   ├── mqtt_bridge.py             # Meshtastic-to-MQTT security gateway (HMAC + anti-replay + ACK)
 │   ├── provision_nodes.py         # 1-Click node provisioner (simulated containers or physical USB/Wi-Fi)
 │   ├── send_control_cmd.py        # Secure HMAC signed command transmitter client
@@ -37,7 +47,7 @@ Meshtasticator/
 │   └── nginx.conf                 # meshtastic-web NGINX reverse-proxy
 │
 ├── lib/                           # Core discrete event simulator library
-├── tests/                         # Pytest test suite for discrete simulator
+├── tests/                         # Unit test suite for simulator core & IoT security pipeline
 ├── batchSim.py                    # Batch simulation runner
 ├── interactiveSim.py              # Interactive visual GUI simulator
 └── loraMesh.py                    # CLI simulator runner
@@ -62,7 +72,7 @@ cp .env.example .env
 
 ### Step 2: Start the Simulation Stack
 ```bash
-# Start RX & TX nodes, WebSocket proxies, Web UI, and Mosquitto MQTT broker
+# Start RX & TX nodes, RF bridge, WebSocket proxies, Web UI, and Mosquitto MQTT broker
 docker compose up -d
 ```
 
@@ -74,17 +84,17 @@ docker compose up -d
 ### Step 4: 1-Click Provisioning & Simulation Scripts
 ```bash
 # Auto-provision simulated nodes (sets names, region, and native MQTT client)
-python meshtasticd-config/provision_nodes.py --sim
+python3 meshtasticd-config/provision_nodes.py --sim
 
 # In separate terminals:
 # 1. Run the Shelly smart relay simulator:
-python meshtasticd-config/shelly_simulator.py --id shelly1-sim01
+python3 meshtasticd-config/shelly_simulator.py --id shelly1-sim01
 
 # 2. Run the Meshtastic-to-MQTT security bridge:
-python meshtasticd-config/mqtt_bridge.py --mesh-port 4404
+python3 meshtasticd-config/mqtt_bridge.py --mesh-port 4404
 
 # 3. Transmit a signed command:
-python meshtasticd-config/send_control_cmd.py --mesh-port 4404 --target shelly1-sim01 --action ON
+python3 meshtasticd-config/send_control_cmd.py --mesh-port 4406 --target shelly1-sim01 --action ON
 ```
 
 ---
@@ -92,8 +102,8 @@ python meshtasticd-config/send_control_cmd.py --mesh-port 4404 --target shelly1-
 ## 4. Testing & Validation
 
 ```bash
-# Run pytest suite
-pytest tests/
+# Run unit tests
+python3 -m unittest discover tests -v
 ```
 
 ---

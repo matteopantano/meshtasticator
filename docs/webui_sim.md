@@ -1,4 +1,4 @@
-# Meshtasticator - Docker Architecture & Setup Documentation
+# Web UI & Daemon Simulator Documentation
 
 This document explains the architecture, issues encountered, solutions applied, and instructions for running `meshtasticd` alongside `meshtastic-web` using Docker Compose.
 
@@ -69,10 +69,10 @@ The system consists of three main components defined in `docker-compose.yaml`:
 
 ## 3. Configuration Files
 
-- [`docker-compose.yaml`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/docker-compose.yaml): Services definition (`meshtasticd`, `ws-proxy`, `web`).
-- [`meshtasticd-config/config.yaml`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/meshtasticd-config/config.yaml): Daemon config setting `MACAddressSource: generate` and `Lora.Region: US`.
-- [`meshtasticd-config/nginx.conf`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/meshtasticd-config/nginx.conf): NGINX configuration for `meshtastic-web` reverse-proxying `/api/v1/` to `ws-proxy:4403`.
-- [`meshtasticd-config/proxy.py`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/meshtasticd-config/proxy.py): Tornado proxy bridging CORS, REST API, WebSockets, and TCP header framing.
+- [`docker-compose.yaml`](../docker-compose.yaml): Services definition (`meshtasticd`, `ws-proxy`, `web`).
+- [`meshtasticd-config/config.yaml`](../meshtasticd-config/config.yaml): Daemon config setting `MACAddressSource: generate` and `Lora.Region: US`.
+- [`meshtasticd-config/nginx.conf`](../meshtasticd-config/nginx.conf): NGINX configuration for `meshtastic-web` reverse-proxying `/api/v1/` to `ws-proxy:4403`.
+- [`meshtasticd-config/proxy.py`](../meshtasticd-config/proxy.py): Tornado proxy bridging CORS, REST API, WebSockets, and TCP header framing.
 
 ---
 
@@ -95,21 +95,21 @@ The system consists of three main components defined in `docker-compose.yaml`:
 
 ---
 
-## 5. Planned MQTT & Shelly Smart Relay Integration
+## 5. MQTT & Shelly Smart Relay Integration
 
-Full details, JSON payload schemas, security specs, and simulation steps are preserved in [`MQTT_SHELLY_SIMULATION.md`](file:///Users/matteopantano/04_projects/19_LoRaWan/03_code/Meshtasticator/MQTT_SHELLY_SIMULATION.md).
+Full details, JSON payload schemas, security specs, and simulation steps are described in [`mqtt_shelly_simulation.md`](mqtt_shelly_simulation.md).
 
 ### Quick Architecture Summary:
 - **Radio Link Encryption**: AES-256-CTR over dedicated secondary private channel (`HomeControl`).
 - **Data Payload**: Compact JSON over `SERIAL_APP` / `TEXT_MESSAGE_APP` containing `ver`, `target`, `action`, `seq`, `sig`.
 - **Security & Authorization**: Gateway checks sender Node ID whitelist, verifies `HMAC-SHA256(CONTROL_SECRET, ...)` signature, and enforces monotonic `seq` to prevent replay attacks.
 - **Shelly MQTT Integration**: 
-- **Meshtastic RX (Gateway / Receiver)**: `meshtasticd-rx` daemon (TCP 4404 via proxy `ws-proxy-rx`, Web UI on `http://localhost:8080`).
-- **Meshtastic TX (Controller / Transmitter)**: `meshtasticd-tx` daemon (TCP 4405 via proxy `ws-proxy-tx`, Web UI on `http://localhost:8081`).
-- **MQTT Broker**: `mosquitto-broker` (Eclipse Mosquitto 2.0 on port 1883).
-- **Shelly Smart Relay Simulator**: `meshtasticd-config/shelly_simulator.py` (simulates Gen1/Gen2 Shelly topics).
-- **Gateway Bridge**: `meshtasticd-config/mqtt_bridge.py` (receives signed packets from RX node, validates HMAC-SHA256 and sequence counter, forwards to MQTT, sends ACK).
-- **Transmitter Test Client**: `meshtasticd-config/send_control_cmd.py` (sends signed packets to TX node).
+  - **Meshtastic RX (Gateway / Receiver)**: `meshtasticd-rx` daemon (TCP 4404 via proxy `ws-proxy-rx`, Web UI on `http://localhost:8080`).
+  - **Meshtastic TX (Controller / Transmitter)**: `meshtasticd-tx` daemon (TCP 4405 via proxy `ws-proxy-tx`, Web UI on `http://localhost:8081`).
+  - **MQTT Broker**: `mosquitto-broker` (Eclipse Mosquitto 2.0 on port 1883).
+  - **Shelly Smart Relay Simulator**: `meshtasticd-config/shelly_simulator.py` (simulates Gen1/Gen2 Shelly topics).
+  - **Gateway Bridge**: `meshtasticd-config/mqtt_bridge.py` (receives signed packets from RX node, validates HMAC-SHA256 and sequence counter, forwards to MQTT, sends ACK).
+  - **Transmitter Test Client**: `meshtasticd-config/send_control_cmd.py` (sends signed packets to TX node).
 
 ---
 
@@ -127,5 +127,3 @@ Full details, JSON payload schemas, security specs, and simulation steps are pre
    - Keep actual keys and local passwords in `.env` or `config.local.yaml` (both excluded in `.gitignore`).
 4. **Git Status & Pre-commit Verification**:
    - Always run `git status` and verify changes before committing to ensure no unintended data files, credentials, or logs are staged.
-
-

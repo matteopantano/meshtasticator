@@ -7,13 +7,13 @@ A comprehensive simulation, testbed, and IoT-integration suite for
 
 | # | Capability | Quickstart | Full docs |
 | :-- | :-- | :-- | :-- |
-| 1 | 📡 **Discrete-Event Radio Simulator** — Python radio-layer simulation for mesh performance, reachability & scalability analysis | [Jump to §1](#-1-discrete-event-radio-simulator) | [DISCRETE_EVENT_SIM.md](DISCRETE_EVENT_SIM.md) |
+| 1 | 📡 **Discrete-Event Radio Simulator** — Python radio-layer simulation for mesh performance, reachability & scalability analysis | [Jump to §1](#-1-discrete-event-radio-simulator) | [docs/discrete_event_sim.md](docs/discrete_event_sim.md) |
 | 2 | 📊 **Batch Simulation & Metrics** — run many simulations across parameter sweeps and plot results | [Jump to §2](#-2-batch-simulation--scalability-metrics) | [`batchSim.py`](batchSim.py), [`plotExample.py`](plotExample.py) |
-| 3 | 🖥️ **Interactive Multi-Node Simulator** — runs real Meshtastic native binaries as separate processes over simulated LoRa links | [Jump to §3](#-3-interactive-multi-node-simulator) | [INTERACTIVE_SIM.md](INTERACTIVE_SIM.md) |
-| 4 | 🌐 **Web UI & Daemon Simulator** — Dockerized `meshtasticd` + official `meshtastic-web` client | [Jump to §4](#-4-web-ui--daemon-simulator-meshtasticd--meshtastic-web) | [CLAUDE.md](CLAUDE.md) |
-| 5 | 🔗 **Multi-Node Docker Testbed & IoT/MQTT Pipeline** — two-node mesh + secure Meshtastic ➔ MQTT ➔ Shelly relay control | [Jump to §5](#-5-multi-node-testbed--iotmqtt-integration) | [MQTT_SHELLY_SIMULATION.md](MQTT_SHELLY_SIMULATION.md) |
+| 3 | 🖥️ **Interactive Multi-Node Simulator** — runs real Meshtastic native binaries as separate processes over simulated LoRa links | [Jump to §3](#-3-interactive-multi-node-simulator) | [docs/interactive_sim.md](docs/interactive_sim.md) |
+| 4 | 🌐 **Web UI & Daemon Simulator** — Dockerized `meshtasticd` + official `meshtastic-web` client | [Jump to §4](#-4-web-ui--daemon-simulator-meshtasticd--meshtastic-web) | [docs/webui_sim.md](docs/webui_sim.md) |
+| 5 | 🔗 **Multi-Node Docker Testbed & IoT/MQTT Pipeline** — two-node mesh + secure Meshtastic ➔ MQTT ➔ Shelly relay control | [Jump to §5](#-5-multi-node-testbed--iotmqtt-integration) | [docs/mqtt_shelly_simulation.md](docs/mqtt_shelly_simulation.md) |
 | 6 | 🔌 **Standalone ESP32 Gateway Firmware** — replaces the Python MQTT bridge on real hardware (SoftAP + embedded broker + native HMAC) | [Jump to §6](#-6-standalone-esp32-gateway-firmware) | [firmware/esp32-gateway/README.md](firmware/esp32-gateway/README.md) |
-| 7 | 🔧 **Physical Hardware Deployment** — deploy the whole pipeline on real Meshtastic nodes + ESP32 + Shelly, zero cloud/computer required | [Jump to §7](#-7-physical-hardware-deployment) | [HARDWARE_DEPLOYMENT_GUIDE.md](HARDWARE_DEPLOYMENT_GUIDE.md) |
+| 7 | 🔧 **Physical Hardware Deployment** — deploy the whole pipeline on real Meshtastic nodes + ESP32 + Shelly, zero cloud/computer required | [Jump to §7](#-7-physical-hardware-deployment) | [docs/hardware_deployment_guide.md](docs/hardware_deployment_guide.md) |
 | 8 | 🧪 **Test Suite** — 62 unit tests covering the simulator core and the IoT security pipeline | [Jump to §8](#-8-tests--environment-setup) | [`tests/`](tests/) |
 
 ---
@@ -41,10 +41,10 @@ python3 loraMesh.py 10 --no-gui
 ```
 Generates visual plots of node placement and overlapping packet schedules.
 
-![](/img/placement_schedule.png)
+![](img/placement_schedule.png)
 
 - **Full usage guide** (custom modem/pathloss/period configs, `--from-file`
-  replay, etc.): [DISCRETE_EVENT_SIM.md](DISCRETE_EVENT_SIM.md)
+  replay, etc.): [docs/discrete_event_sim.md](docs/discrete_event_sim.md)
 
 ---
 
@@ -62,7 +62,7 @@ Results are saved under `out/report/` for later analysis; see
 [`plotExample.py`](plotExample.py) for a sample plotting script. Edit
 `batchSim.py` directly to sweep your own parameters.
 
-![](/img/reachability_hops.png)
+![](img/reachability_hops.png)
 
 ---
 
@@ -86,10 +86,10 @@ python3 interactiveSim.py 3 -p /path/to/firmware/.pio/build/native/
 Then send commands interactively, e.g. `broadcast 0 "hello mesh"`,
 `traceroute 0 1`, `plot` to visualize routes and airtime.
 
-![](/img/route_plot2.png)
+![](img/route_plot2.png)
 
 - **Full usage guide** (all commands, scripted mode, pathloss models):
-  [INTERACTIVE_SIM.md](INTERACTIVE_SIM.md)
+  [docs/interactive_sim.md](docs/interactive_sim.md)
 
 ---
 
@@ -137,7 +137,7 @@ Run the official native C++ Meshtastic daemon (`meshtasticd`) in simulation mode
    .venv/bin/meshtastic --host localhost:4404 --set lora.region US
    ```
 
-- **Detailed Technical Guide**: See [CLAUDE.md](CLAUDE.md) for proxy framing details and architecture notes.
+- **Detailed Technical Guide**: See [docs/webui_sim.md](docs/webui_sim.md) for proxy framing details and architecture notes.
 
 ---
 
@@ -171,7 +171,7 @@ docker compose up -d
 Web UIs: RX node at `http://localhost:8080`, TX node at `http://localhost:8081`.
 
 - **Full pipeline design, security spec, and hybrid-hardware testing
-  guide**: see [MQTT_SHELLY_SIMULATION.md](MQTT_SHELLY_SIMULATION.md).
+  guide**: see [docs/mqtt_shelly_simulation.md](docs/mqtt_shelly_simulation.md).
 
 ---
 
@@ -219,7 +219,7 @@ computer required at runtime** once provisioned.
 ```
 
 - **Full bill of materials, wiring diagram, and step-by-step guide**: see
-  [HARDWARE_DEPLOYMENT_GUIDE.md](HARDWARE_DEPLOYMENT_GUIDE.md).
+  [docs/hardware_deployment_guide.md](docs/hardware_deployment_guide.md).
 
 ---
 

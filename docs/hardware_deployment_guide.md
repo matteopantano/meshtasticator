@@ -49,13 +49,15 @@ The ESP32 acts as the **central wireless hub**, hosting its own local Wi-Fi Acce
 
 ## 3. Step 1: Flash & Configure the ESP32 Hub
 
-### Required Arduino Libraries
+See [`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) for the complete PlatformIO firmware implementation and flashing steps.
+
+### Required Arduino Libraries (if using Arduino IDE)
 Open Arduino IDE ➔ **Tools** ➔ **Manage Libraries...** and install:
 - **`TinyMqtt`** (by hsaturn)
 - **`ArduinoJson`** (by Benoit Blanchon, v7.x)
 
-### ESP32 Firmware (`ESP32_WiFi_AP_MQTT_Hub.ino`)
-Upload the following sketch to your ESP32 board:
+### ESP32 Firmware (`ESP32_WiFi_AP_MQTT_Hub.ino` / `firmware/esp32-gateway/src/main.cpp`)
+Upload the sketch to your ESP32 board:
 
 ```cpp
 #include <WiFi.h>
@@ -211,7 +213,6 @@ meshtastic --set mqtt.enabled true \
            --set mqtt.encryption_enabled false \
            --set mqtt.root "msh"
 ```
-
 
 ---
 

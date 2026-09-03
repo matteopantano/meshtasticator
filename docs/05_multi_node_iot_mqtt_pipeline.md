@@ -21,7 +21,7 @@ graph TD
     end
 
     subgraph TargetDevices ["Shelly Smart Relays (Wi-Fi)"]
-        Shelly1["Shelly 1 / Plus 1\n(Relay 0)"]
+        Shelly1["Shelly Gen 2+ (Plus 1 / 1 Gen4)\n(switch:0)"]
         Broker <--> |MQTT Subscribe / Publish| Shelly1
     end
 ```
@@ -40,25 +40,41 @@ To keep LoRa payload sizes minimal (< 200 bytes) while enabling full validation 
   "target": "shelly1-sim01",
   "action": "ON",
   "seq": 1042,
-  "sig": "9b9a4221"
+  "sig": "5e6a85c2"
 }
 ```
-* **`ver`**: Protocol version integer.
-* **`target`**: Identifier of target device connected to MQTT broker.
-* **`action`**: `ON`, `OFF`, or `TOGGLE`.
+* **`ver`**: Protocol version integer (informational; not currently validated).
+* **`target`**: Identifier of the target device connected to the MQTT broker.
+  **Must exactly match the Shelly's MQTT topic prefix** (Gen 2+: *Settings ➔
+  MQTT ➔ "Custom prefix"*, defaults to the device id such as
+  `shelly1g4-a1b2c3d4e5f6`), since it is used verbatim to build the command
+  topic `<target>/command/switch:0`.
+* **`action`**: `ON`, `OFF`, or `TOGGLE` (case-insensitive on the wire; upper-cased before signing).
 * **`seq`**: Monotonic counter / timestamp for anti-replay verification.
-* **`sig`**: Truncated hex HMAC signature computed over `target + action + seq` with a shared secret key.
+* **`sig`**: Truncated hex HMAC signature computed over `target:ACTION:seq` with a shared secret key (see §2B).
+
+*(The sample `sig` above is computed with the default development secret
+`MeshShellySecret2026`; regenerate it if you change `CONTROL_SECRET`.)*
 
 #### Response / Status ACK Payload (Node RX ➔ Node TX)
 ```json
 {
   "ver": 1,
-  "target": "shelly1-sim01",
+  "device": "shelly1-sim01",
   "state": "ON",
   "ack_seq": 1042,
   "status": "OK"
 }
 ```
+* **`device`**: the `target` the ACK refers to (field name is `device`, as
+  emitted by both `mqtt_bridge.py` and the ESP32 firmware and consumed by
+  `send_control_cmd.py`).
+* **`state`**: `ON` / `OFF` as reported by the Shelly's status topic
+  (`UNKNOWN` if the Gen 2+ status JSON could not be parsed).
+* **`ack_seq`**: echoes the `seq` of the command being acknowledged, which
+  is how `send_control_cmd.py` matches the ACK to its request.
+* The ACK is **not** HMAC-signed today: its authenticity relies on the
+  LoRa channel PSK. Adding a signature is tracked in the roadmap.
 
 ---
 
@@ -130,13 +146,39 @@ sender/seq for the ACK.
 
 ### C. Shelly Smart Relay MQTT Integration
 
-#### Shelly Standard Topics:
-* **Shelly Gen 1 (e.g. Shelly 1/1PM)**:
-  * Command Topic: `shellies/shelly1-<device_id>/relay/0/command` (Payload: `on` or `off`)
-  * State Topic: `shellies/shelly1-<device_id>/relay/0` (Payload: `on` or `off`)
-* **Shelly Gen 2 / Plus Series (RPC Protocol)**:
-  * Command Topic: `<device_id>/rpc` (Payload: `{"id":1,"src":"meshtastic","method":"Switch.Set","params":{"id":0,"on":true}}`)
-  * Status Topic: `<device_id>/status/switch:0` (Payload: `{"output":true,...}`)
+#### Shelly Standard Topics (reference)
+* **Shelly Gen 1 (e.g. Shelly 1/1PM, 2.5)**:
+  * Command Topic: `shellies/<device_id>/relay/0/command` (Payload: `on` / `off` / `toggle`)
+  * State Topic: `shellies/<device_id>/relay/0` (Payload: `on` or `off`)
+* **Shelly Gen 2+ (Plus / Pro / Gen3 / Gen4 - RPC protocol)**:
+  * RPC Topic: `<prefix>/rpc` (Payload: `{"id":1,"src":"meshtastic","method":"Switch.Set","params":{"id":0,"on":true}}`)
+  * **MQTT control Topic: `<prefix>/command/switch:0`** (Payload: `on` / `off` / `toggle` / `status_update`) - requires the *"Enable 'MQTT Control'"* setting (`enable_control`, default **on**).
+  * Status Topic: `<prefix>/status/switch:0` (Payload: `{"id":0,"source":"MQTT","output":true,...}`) - requires *"Generic status update over MQTT"* (`status_ntf`, default **off** - must be enabled!).
+
+  `<prefix>` is the device's `topic_prefix` (defaults to its device id).
+
+#### What the gateway actually publishes / subscribes (since Phase 4)
+
+| Direction | Topic | Payload | Implemented in |
+| :-- | :-- | :-- | :-- |
+| Gateway ➔ Shelly (command) | `<target>/command/switch:0` | `on` / `off` / `toggle` | `mqtt_bridge.py` `on_meshtastic_receive()`, `main.cpp` `processMeshCommand()` |
+| Shelly ➔ Gateway (status, Gen 2+) | `+/status/switch:0` | `{"output":true,...}` ➔ state `ON`/`OFF` | `on_mqtt_message()` / `handleShellyStatus()` |
+| Shelly ➔ Gateway (status, Gen 1) | `shellies/+/relay/0` | `on` / `off` | same |
+
+> [!IMPORTANT]
+> Phase 4 (real Shelly 1 Gen4 bring-up) switched the **outbound command
+> topic** from the Gen 1 `shellies/<id>/relay/0/command` to the Gen 2+
+> `<target>/command/switch:0` format in **both** `mqtt_bridge.py` and the
+> ESP32 firmware. Consequences:
+> - A **Gen 1** Shelly is currently *not* controllable through the gateway
+>   (only its status topic is still understood). A topic-profile flag
+>   (`gen1` / `gen2` / `auto`) is on the roadmap.
+> - The ACK path depends on the Shelly publishing `<prefix>/status/switch:0`,
+>   which on Gen 2+ devices is **off by default** (`status_ntf`). Enable
+>   *"Generic status update over MQTT"* in the Shelly web UI, otherwise the
+>   relay toggles but the mesh never receives an ACK.
+> - `shelly_simulator.py` subscribes to all three command formats, so the
+>   simulated flow keeps working regardless of which topic the gateway uses.
 
 ---
 
@@ -197,9 +239,21 @@ To test directly from the browser, paste one of the following JSON payloads into
 ### Option B: Physical Hardware Provisioning (USB)
 
 ```bash
-# Auto-provision physical hardware node via USB:
+# Auto-provision the physical RX gateway node via USB (joins the ESP32-Hub
+# SoftAP and points its native MQTT client at 192.168.4.1):
 python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB0 --role rx
+
+# Auto-provision the physical TX node (joins your home Wi-Fi, MQTT disabled):
+python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB1 --role tx
 ```
+
+`provision_nodes.py` sets owner names, `lora.region`, Wi-Fi and the
+`mqtt.*` module, but it does **not** (yet) enable `uplink_enabled` /
+`downlink_enabled` on channels nor create the `mqtt` downlink channel - do
+that manually as described in
+[`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) §5,
+or follow the full walkthrough in
+[`07_physical_hardware_deployment.md`](07_physical_hardware_deployment.md).
 
 ---
 
@@ -209,11 +263,13 @@ python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB0 --role rx
 | :--- | :--- | :--- |
 | **HMAC-SHA256 Auth** | ✅ Verified | Truncated hex signature verified against shared secret |
 | **Anti-Replay Counter** | ✅ Verified | Reused/stale sequence numbers rejected |
-| **Shelly Simulator** | ✅ Verified | Toggles relay state and emits Gen 1 / Gen 2 topics on `1883` |
-| **Mesh Status ACK** | ✅ Verified | Bidirectional acknowledgment returned over mesh |
+| **Shelly Simulator** | ✅ Verified | Toggles relay state on Gen 1, Gen 2 RPC **and** Gen 2+ `command/switch:0` topics; emits Gen 1 / Gen 2 status topics on `1883` |
+| **Mesh Status ACK (Python bridge)** | ✅ Verified | Bidirectional acknowledgment returned over mesh via `mesh_iface.sendText()` |
 | **Automated Provisioning**| ✅ Verified | Reads `.env`, sets names, LoRa region, and MQTT module |
 | **Simulated RF Cross-Routing** | ✅ Verified | `meshtasticd-config/sim_rf_bridge.py` cross-relays `SIMULATOR_APP` (portnum 69) packets between `ws-proxy-rx:4404` and `ws-proxy-tx:4404` mux ports, running as the `sim-radio-bridge` Docker service |
-| **ESP32 Standalone Firmware** | ✅ Implemented & Verified | `firmware/esp32-gateway/` implements the same HMAC/anti-replay pipeline natively (SoftAP + `TinyMqtt` + `mbedtls`), matching the Python gateway specification |
+| **Real Shelly 1 Gen4 actuation** | ✅ Verified (Phase 4) | Hybrid setup: simulated mesh + `mqtt_bridge.py` publishing `<target>/command/switch:0` to the ESP32-hosted broker toggled a physical Shelly 1 Gen4 and returned the ACK |
+| **ESP32 firmware: build, SoftAP, embedded broker** | ✅ Verified (Phase 4) | PlatformIO build/upload OK; SoftAP + `TinyMqtt` broker accepted the Shelly and the Python tooling as MQTT clients |
+| **ESP32 firmware: native security pipeline** | ⚠️ **Not yet verified on hardware** | The C++ whitelist / anti-replay / HMAC path (`processMeshCommand()`) and the `msh/<REGION>/2/json/mqtt/` downlink ACK (`sendMeshAck()`) have only been reviewed against the Python reference - Phase 4 validated the *Python* bridge through the ESP32 broker, not the firmware's own verification. Covered by Phase 5 |
 
 ---
 
@@ -256,7 +312,7 @@ toggled the Shelly simulator, and the ACK was relayed back to TX, printing
 `🎉 Status ACK Received via Meshtastic!`. The `--bad-sig` and `--replay`
 flags were also confirmed to be silently dropped by the gateway (no ACK,
 timeout message printed), and the existing test suite
-(`.venv/bin/python3 -m unittest discover tests -v`) remained green (62/62) since the
+(`.venv/bin/python3 -m unittest discover tests -v`) remained green since the
 bridge lives entirely in `meshtasticd-config/` and requires Docker/
 `meshtastic` only at runtime, not at test-collection time.
 
@@ -296,10 +352,13 @@ You do not need **physical Meshtastic LoRa radio hardware** to test the ESP32 Ga
    and `meshtasticd-tx` can exchange simulated LoRa packets:
    ```bash
    docker compose up -d
+   docker compose stop mqtt-broker     # the ESP32 is the broker in this test
    .venv/bin/python3 meshtasticd-config/provision_nodes.py --sim
    ```
-   (You do **not** need to start the bundled `mqtt-broker` / `mosquitto`
-   service for this hybrid test - the ESP32 is the broker.)
+   (The bundled Mosquitto is stopped so nothing else listens on
+   `localhost:1883` and you cannot accidentally talk to the wrong broker.
+   Do **not** comment it out of `docker-compose.yaml` - the fully-simulated
+   flow in §3 depends on it.)
 4. **Point the Shelly simulator at the ESP32 broker** instead of Mosquitto:
    ```bash
    .venv/bin/python3 meshtasticd-config/shelly_simulator.py \
@@ -316,13 +375,37 @@ You do not need **physical Meshtastic LoRa radio hardware** to test the ESP32 Ga
    .venv/bin/python3 meshtasticd-config/send_control_cmd.py \
      --mesh-port 4406 --target shelly1-sim01 --action ON
    ```
-6. Optionally, run `mqtt_bridge.py` itself against the ESP32 broker (see
-   the command above) instead of / alongside the ESP32's own native
-   verification, to cross-check that both the Python and firmware HMAC
-   implementations accept/reject the exact same packets.
+6. Run `mqtt_bridge.py` against the ESP32 broker (Path A below) so the
+   simulated RX node's packets are validated by Python and published to the
+   ESP32-hosted broker:
+   ```bash
+   .venv/bin/python3 meshtasticd-config/mqtt_bridge.py \
+     --mesh-port 4404 --mqtt-host 192.168.4.1 --mqtt-port 1883
+   ```
+   To exercise the ESP32's *own* verification (Path B) you need a physical
+   gateway node whose native MQTT client publishes JSON uplink to the ESP32 -
+   or, without any radio, publish a hand-crafted uplink envelope with
+   `mosquitto_pub` as shown in
+   [`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) §7.
 
-**Expected result**: the ESP32 serial monitor logs the incoming signed
-JSON command, the three security checks (whitelist / anti-replay / HMAC),
-the outgoing `shellies/<id>/relay/0/command` publish, and the ACK it
-publishes back once it observes the Shelly's `shellies/<id>/relay/0`
-status topic change.
+**Expected result** (two distinct paths - be clear about which one you are
+validating):
+
+* **Path A - Python bridge through the ESP32 broker** (`mqtt_bridge.py
+  --mqtt-host 192.168.4.1`): the Python terminal logs the three security
+  checks, publishes `<target>/command/switch:0`, and prints the ACK it sends
+  via `sendText()`. The ESP32 serial monitor only shows `[MQTT RX]` traffic
+  passing through its broker. *This is what Phase 4 verified.*
+* **Path B - ESP32 native verification** (no `mqtt_bridge.py` running; the
+  RX node's native MQTT client is pointed at `192.168.4.1` with
+  `mqtt.json_enabled true` and `uplink_enabled` on the channel): the ESP32
+  serial monitor itself logs `[Check 1/3: Whitelist]`, `[Check 2/3:
+  Anti-Replay]`, `[Check 3/3: HMAC Signature]`, the `[MQTT Publish]` to
+  `<target>/command/switch:0`, then `[MQTT State Event]` when the Shelly's
+  `<target>/status/switch:0` arrives, and finally `[Mesh ACK] ->
+  msh/<REGION>/2/json/mqtt/ : {...}`. *This path is **not** yet verified
+  on hardware - see ROADMAP Phase 5.* Note that Path B **cannot** be fully
+  exercised with the Docker simulated nodes: `meshtasticd -s` containers
+  cannot reach the ESP32's SoftAP subnet unless the host routes it, and the
+  JSON downlink requires a channel literally named `mqtt` on a physical
+  gateway node.

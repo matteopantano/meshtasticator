@@ -102,16 +102,21 @@ services:
   # ============================================================
   # MQTT Broker (Mosquitto)
   # ============================================================
-  # mqtt-broker:
-  #   image: eclipse-mosquitto:2.0
-  #   container_name: mosquitto-broker
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ./meshtasticd-config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-  #   ports:
-  #     - "1883:1883"
-  #   networks:
-  #     - meshtastic
+  # Required for the fully-simulated flow (mqtt_bridge.py / shelly_simulator.py
+  # default to localhost:1883, and provision_nodes.py --sim points the nodes'
+  # native MQTT client at the "mqtt-broker" hostname).
+  # For hybrid tests where a physical ESP32 (192.168.4.1:1883) is the broker,
+  # simply stop this one:  docker compose stop mqtt-broker
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto-broker
+    restart: unless-stopped
+    volumes:
+      - ./meshtasticd-config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+    networks:
+      - meshtastic
 
 volumes:
   meshtasticd-data-rx:

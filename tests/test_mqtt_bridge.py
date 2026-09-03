@@ -123,8 +123,10 @@ class TestOnMeshtasticReceiveSecurity(unittest.TestCase):
         packet = self.make_packet("!aaaa1111", "shelly1-sim01", "ON", 1)
         self.bridge.on_meshtastic_receive(packet, interface=None)
 
+        # Phase 4 aligned the outbound command topic to the Shelly Gen 2+/Gen4
+        # "MQTT control" format: <prefix>/command/switch:0 with on|off|toggle.
         self.bridge.mqtt_client.publish.assert_called_once_with(
-            "shellies/shelly1-sim01/relay/0/command", "on", qos=1
+            "shelly1-sim01/command/switch:0", "on", qos=1
         )
         self.assertEqual(self.bridge.last_seen_seq["!aaaa1111"], 1)
         self.assertEqual(
@@ -136,7 +138,7 @@ class TestOnMeshtasticReceiveSecurity(unittest.TestCase):
         packet = self.make_packet("!aaaa1111", "shelly1-sim01", "TOGGLE", 5)
         self.bridge.on_meshtastic_receive(packet, interface=None)
         self.bridge.mqtt_client.publish.assert_called_once_with(
-            "shellies/shelly1-sim01/relay/0/command", "toggle", qos=1
+            "shelly1-sim01/command/switch:0", "toggle", qos=1
         )
 
     def test_sender_not_in_whitelist_is_rejected(self):

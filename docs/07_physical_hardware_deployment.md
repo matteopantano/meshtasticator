@@ -22,7 +22,7 @@ The ESP32 acts as the **central wireless hub**, hosting its own local Wi-Fi Acce
                ▼                          ▼
 ┌────────────────────────┐      ┌────────────────────────┐
 │   Meshtastic Node B    │      │   Shelly Smart Relay   │
-│ (Gateway - e.g. Heltec)│      │  (Shelly 1 / Plus 1)   │
+│ (Gateway - e.g. Heltec)│      │ (Gen 2+, e.g. 1 Gen4)  │
 │   Wi-Fi Client         │      │   Wi-Fi Client         │
 │   IP: 192.168.4.2      │      │   IP: 192.168.4.3      │
 │   MQTT ➔ 192.168.4.1   │      │   MQTT ➔ 192.168.4.1   │
@@ -40,137 +40,73 @@ The ESP32 acts as the **central wireless hub**, hosting its own local Wi-Fi Acce
 
 ## 2. Bill of Materials (BOM)
 
-1. **ESP32 Dev Board**: Any standard ESP32-WROOM / ESP32-S3 / ESP32-C3 board ($4-$6).
-2. **Meshtastic Gateway Node (Node B)**: Any ESP32-based LoRa node with Wi-Fi (e.g. Heltec V3, LilyGO T-Beam, T-Echo).
-3. **Meshtastic Transmitter Node (Node A)**: Any Meshtastic node (Handheld, mobile app connected, or stationary).
-4. **Shelly Smart Relay**: Shelly 1, Shelly Plus 1, Shelly Pro, or Shelly 2.5 (110-240V AC / 12-24V DC).
+1. **ESP32 Dev Board (Hub)**: Any standard ESP32-WROOM / ESP32-S3 / ESP32-C3 board ($4-$6). Runs `firmware/esp32-gateway/`.
+2. **Meshtastic Gateway Node (Node B / RX)**: an **ESP32-based** LoRa node **with Wi-Fi** (e.g. Heltec V3, LilyGO T-Beam, T-Deck, Station G2). nRF52 boards (RAK4631, T-Echo) are **not** suitable: no Wi-Fi and no `mqtt.json_enabled` support.
+3. **Meshtastic Transmitter Node (Node A / TX)**: Any Meshtastic node (handheld, phone-app connected, or stationary).
+4. **Shelly Smart Relay**: a **Gen 2+ device** (Shelly Plus 1 / Plus 1PM, Pro, Gen3, **Shelly 1 Gen4** - the model validated in Phase 4). Gen 1 devices (Shelly 1 / 1PM / 2.5) are currently *not* controllable (see [`05_multi_node_iot_mqtt_pipeline.md`](05_multi_node_iot_mqtt_pipeline.md) §2C).
+5. **USB cables** for provisioning the Meshtastic nodes and flashing the ESP32, and a laptop with the repo's `.venv` (`meshtastic` CLI) and PlatformIO.
 
 ---
 
 ## 3. Step 1: Flash & Configure the ESP32 Hub
 
-See [`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) for the complete PlatformIO firmware implementation and flashing steps.
+The complete, maintained firmware is `firmware/esp32-gateway/src/main.cpp`;
+see [`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) for
+the library list, the PlatformIO toolchain workarounds, the `.env` ➔ macro
+mapping and the flashing steps. In short:
 
-### Required Arduino Libraries (if using Arduino IDE)
-Open Arduino IDE ➔ **Tools** ➔ **Manage Libraries...** and install:
-- **`TinyMqtt`** (by hsaturn)
-- **`ArduinoJson`** (by Benoit Blanchon, v7.x)
-
-### ESP32 Firmware (`ESP32_WiFi_AP_MQTT_Hub.ino` / `firmware/esp32-gateway/src/main.cpp`)
-Upload the sketch to your ESP32 board:
-
-```cpp
-#include <WiFi.h>
-#include <TinyMqtt.h>       // Lightweight C++ MQTT Broker
-#include <ArduinoJson.h>    // JSON parser
-#include "mbedtls/md.h"     // Native hardware HMAC-SHA256
-
-// --- CONFIGURATION ---
-const char* AP_SSID       = "ESP32-Hub";
-const char* AP_PASS       = "YourSecureWifiPass123";
-const char* CONTROL_SECRET = "MeshShellySecret2026"; // Must match transmitter HMAC secret
-
-MqttBroker broker(1883);
-long last_seen_seq = -1;
-
-// --- HMAC-SHA256 Verification ---
-bool verify_hmac(const String& target, const String& action, long seq, const String& received_sig) {
-    String payload = target + ":" + action + ":" + String(seq);
-    
-    byte hmacResult[32];
-    mbedtls_md_context_t ctx;
-    mbedtls_md_init(&ctx);
-    mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
-    mbedtls_md_hmac_starts(&ctx, (const unsigned char*)CONTROL_SECRET, strlen(CONTROL_SECRET));
-    mbedtls_md_hmac_update(&ctx, (const unsigned char*)payload.c_str(), payload.length());
-    mbedtls_md_hmac_finish(&ctx, hmacResult);
-    mbedtls_md_free(&ctx);
-    
-    char calculated_sig[9];
-    sprintf(calculated_sig, "%02x%02x%02x%02x", hmacResult[0], hmacResult[1], hmacResult[2], hmacResult[3]);
-    return received_sig.equalsIgnoreCase(calculated_sig);
-}
-
-// --- MQTT Message Router ---
-void onMqttMessage(const MqttClient* /*source*/, const Topic& topic, const char* payload, size_t /*length*/) {
-    String topicStr = topic.c_str();
-    String msgStr = String(payload);
-
-    // 1. Ingest Meshtastic Packets
-    if (topicStr.startsWith("msh/")) {
-        Serial.printf("\n[Mesh MQTT RX] Topic: %s\n", topicStr.c_str());
-
-        // Decode Meshtastic JSON wrapper or raw JSON
-        JsonDocument meshDoc;
-        DeserializationError err = deserializeJson(meshDoc, msgStr);
-        if (err) return;
-
-        String textPayload = meshDoc["payload"]["text"] | "";
-        if (textPayload.length() == 0) {
-            textPayload = msgStr;
-        }
-
-        JsonDocument cmdDoc;
-        DeserializationError cmdErr = deserializeJson(cmdDoc, textPayload);
-        if (cmdErr) return;
-
-        const char* target = cmdDoc["target"];
-        const char* action = cmdDoc["action"];
-        long seq           = cmdDoc["seq"] | -1;
-        const char* sig    = cmdDoc["sig"];
-
-        if (!target || !action || seq < 0 || !sig) return;
-
-        // Security Check 1: Anti-Replay
-        if (seq <= last_seen_seq) {
-            Serial.printf("🛡️ [REJECTED: Replay Attack] Received seq %ld <= last %ld\n", seq, last_seen_seq);
-            return;
-        }
-
-        // Security Check 2: HMAC-SHA256 Signature
-        if (!verify_hmac(target, action, seq, sig)) {
-            Serial.println("🛡️ [REJECTED: Invalid HMAC Signature] Tampering detected!");
-            return;
-        }
-
-        // Passed security checks
-        last_seen_seq = seq;
-        Serial.println("✓ HMAC & Sequence Verified! Dispatching to Shelly...");
-
-        // Publish to Shelly MQTT command topic
-        String shellyTopic = "shellies/" + String(target) + "/relay/0/command";
-        String cmdVal = String(action);
-        cmdVal.toLowerCase();
-
-        broker.publish(shellyTopic.c_str(), cmdVal.c_str());
-        Serial.printf("[Shelly Command] %s ➔ %s\n", shellyTopic.c_str(), cmdVal.c_str());
-    }
-    // 2. Capture Shelly Status Feedback
-    else if (topicStr.startsWith("shellies/") && topicStr.endsWith("/relay/0")) {
-        Serial.printf("📥 [Shelly State Feedback] %s -> %s\n", topicStr.c_str(), msgStr.c_str());
-    }
-}
-
-void setup() {
-    Serial.begin(115200);
-    delay(1000);
-    Serial.println("\n=== ESP32 Meshtastic-Shelly Wireless Hub ===");
-
-    // 1. Start SoftAP
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASS);
-    Serial.printf("✓ Wi-Fi AP '%s' active at IP: %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
-
-    // 2. Start Embedded Broker
-    broker.begin();
-    broker.setCallback(onMqttMessage);
-    Serial.println("✓ Embedded MQTT Broker listening on port 1883.\n");
-}
-
-void loop() {
-    broker.loop();
-}
+```bash
+cp .env.example .env            # then edit WIFI_PASS, CONTROL_SECRET, LORA_REGION, GATEWAY_NODE_ID
+cd firmware/esp32-gateway
+pio run -t upload                # load_env.py injects .env values as compile-time defines
+pio device monitor               # 115200 baud
 ```
+
+Before flashing for production:
+
+1. Set `GATEWAY_NODE_ID` in `.env` to the Node ID of your RX gateway node
+   (`meshtastic --port /dev/ttyUSB0 --info` ➔ `Owner`/`My info` ➔ `!xxxxxxxx`
+   ➔ write it as `0xxxxxxxxx`). It is used as `from` in the downlink ACK.
+2. Set `LORA_REGION` to the same region you will set on the nodes
+   (`EU_868`, `US`, ...). It becomes the `REGION` segment of the ACK topic.
+3. Replace `ALLOWED_NODES[] = {"*"}` in `main.cpp` with the TX node IDs
+   allowed to control the relay.
+
+What the firmware does once running (all natively in C++ on the hub):
+
+| Stage | Behaviour |
+| :-- | :-- |
+| Wi-Fi | SoftAP `WIFI_SSID` (default `ESP32-Hub`) at `192.168.4.1/24` |
+| Broker | `TinyMqtt` MQTT 3.1.1 broker on `1883`, unauthenticated (SoftAP password is the access control) |
+| Uplink | Subscribes to `msh/#`; for `type == "text"` envelopes extracts `payload.text` and parses the command JSON |
+| Check 1/3 | Sender whitelist (`ALLOWED_NODES`, decimal `from` converted to `!xxxxxxxx`) |
+| Check 2/3 | Per-sender monotonic `seq` (table of 16 nodes) |
+| Check 3/3 | HMAC-SHA256 over `target:ACTION:seq`, first 8 hex chars, constant-time compare |
+| Command | Publishes `<target>/command/switch:0` with `on` / `off` / `toggle` |
+| Status | Subscribes `+/status/switch:0` and `shellies/+/relay/0`; matches the target against a pending-request table (30 s timeout) |
+| ACK | Publishes `{"from":GATEWAY_NODE_ID,"to":<sender>,"type":"sendtext","payload":"{...ack...}"}` to `msh/<REGION>/2/json/mqtt/` |
+
+Expected serial output on boot:
+
+```
+============================================================
+  ESP32 Meshtastic <-> MQTT <-> Shelly Security Gateway
+============================================================
+[Wi-Fi] SoftAP 'ESP32-Hub' active. IP: 192.168.4.1
+[MQTT] Embedded broker listening on port 1883.
+[MQTT] Local client subscribed to Shelly status & mesh uplink topics.
+[Ready] Listening for secure Meshtastic control packets...
+```
+
+(If you see `[WARNING] MESH_GATEWAY_NODE_ID is not configured`, fix `.env`
+and rebuild - ACKs will not be routable otherwise.)
+
+> [!NOTE]
+> As of Phase 4 only the build, SoftAP and broker stages of this table have
+> been confirmed on hardware. The security checks, command publish and the
+> ACK downlink were validated through the *Python* `mqtt_bridge.py` using the
+> ESP32 as broker, not through the firmware's own code path. Phase 5 in
+> `ROADMAP.md` is the test plan that closes this gap.
 
 ---
 
@@ -193,9 +129,31 @@ python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB1 --role tx
 
 This automatically:
 1. Names the node (`Mesh RX Node` / `Mesh TX Node`).
-2. Configures the LoRa frequency region (`LORA_REGION` from `.env`).
-3. **For RX Gateway**: Connects to the ESP32 Hub Wi-Fi (`WIFI_SSID_RX="ESP32-Hub"`) and enables native Meshtastic MQTT client pointing to the ESP32 (`192.168.4.1:1883`).
+2. Configures the LoRa frequency region (`LORA_REGION` from `.env`, or `--region`).
+3. **For RX Gateway**: Connects to the ESP32 Hub Wi-Fi (`WIFI_SSID_RX="ESP32-Hub"`) and enables the native Meshtastic MQTT client pointing to the ESP32 (`mqtt.address` = `MQTT_HOST_REAL`, default `192.168.4.1`; `json_enabled true`, `encryption_enabled false`, `root msh`).
 4. **For Remote TX**: Connects to your local Wi-Fi (`WIFI_SSID_TX="YourHomeWifi"`) so you can access its Web UI from your phone/browser on your home network, while leaving MQTT disabled (communication travels strictly over LoRa).
+
+> [!WARNING]
+> **What the provisioner does *not* do (yet)** - finish these by hand on the
+> RX gateway node, otherwise nothing reaches the ESP32 and no ACK comes back:
+>
+> ```bash
+> # 1. Uplink: publish channel-0 mesh packets to MQTT as JSON
+> meshtastic --port /dev/ttyUSB0 --ch-index 0 --ch-set uplink_enabled true
+>
+> # 2. Downlink: a channel literally named "mqtt" with downlink enabled is
+> #    what makes the node forward msh/<REGION>/2/json/mqtt/ envelopes to LoRa
+> meshtastic --port /dev/ttyUSB0 --ch-add mqtt
+> meshtastic --port /dev/ttyUSB0 --info          # find the new channel index
+> meshtastic --port /dev/ttyUSB0 --ch-index <idx> --ch-set downlink_enabled true
+>
+> # 3. Check the result
+> meshtastic --port /dev/ttyUSB0 --info | grep -A3 -i "mqtt\|channel"
+> ```
+>
+> Also note: `mqtt.address` carries only the host; a non-default port must be
+> written as `host:port`. Enabling Wi-Fi on an ESP32 node turns its Bluetooth
+> off, so keep the USB cable connected while configuring.
 
 ---
 
@@ -224,19 +182,32 @@ meshtastic --port /dev/ttyUSB1 \
 
 ---
 
-## 5. Step 3: Configure the Shelly Smart Relay
+## 5. Step 3: Configure the Shelly Smart Relay (Gen 2+ / Gen4)
 
-1. Power the Shelly on mains or bench power.
-2. From your phone/laptop, join the Shelly's setup Wi-Fi (`Shelly1-XXXXXX`).
-3. Open browser to **`http://192.168.33.1/`**.
-4. Configure **Wi-Fi Mode - Client**:
-   * **SSID**: `ESP32-Hub`
-   * **Password**: `YourSecureWifiPass123`
-5. Configure **Advanced - Developer Settings (MQTT)**:
-   * **Enable MQTT**: `[x] Checked`
-   * **Server**: `192.168.4.1:1883`
-   * **Custom MQTT Prefix / Device ID**: `shelly1-01`
+1. Power the Shelly on mains or bench power (**mind the mains wiring** -
+   use a qualified electrician for the 110-240 V AC terminals).
+2. From your phone/laptop, join the Shelly's setup Wi-Fi (`ShellyXXXX-XXXXXX`).
+3. Open a browser to **`http://192.168.33.1/`**.
+4. **Settings ➔ Wi-Fi ➔ Wi-Fi 1 client**:
+   * **SSID**: `ESP32-Hub` (your `WIFI_SSID`)
+   * **Password**: your `WIFI_PASS`
+5. **Settings ➔ MQTT**:
+   * **Enable MQTT network**: `[x]`
+   * **Server**: `192.168.4.1:1883` - no TLS, no user/password
+   * **Custom prefix**: `shelly1-01` (**this exact string is the `target` in
+     every signed command**; leave empty to use the device id instead)
+   * **Enable 'MQTT Control'**: `[x]` (default on) - command topic `<prefix>/command/switch:0`
+   * **Generic status update over MQTT**: `[x]` (**default off** - required for
+     `<prefix>/status/switch:0`, i.e. for the ACK)
    * Save and reboot.
+6. Verify from a laptop joined to `ESP32-Hub`:
+   ```bash
+   mosquitto_sub -h 192.168.4.1 -v -t 'shelly1-01/#'          # in one terminal
+   mosquitto_pub -h 192.168.4.1 -t 'shelly1-01/command/switch:0' -m toggle
+   ```
+   The relay should click and `shelly1-01/status/switch:0 {"output":...}`
+   should appear. If the click happens but no status line appears, step 5's
+   "Generic status update" is still off.
 
 ---
 
@@ -245,11 +216,65 @@ meshtastic --port /dev/ttyUSB1 \
 From your phone app or transmitter CLI, send the signed JSON string over your encrypted Meshtastic channel:
 
 ```json
-{"ver": 1, "target": "shelly1-01", "action": "ON", "seq": 1001, "sig": "e0e2e92c"}
+{"ver": 1, "target": "shelly1-01", "action": "ON", "seq": 1001, "sig": "ccb1d0e1"}
+```
+
+*(Signature for the default development secret `MeshShellySecret2026`;
+compute your own with the one-liner in
+[`../firmware/esp32-gateway/README.md`](../firmware/esp32-gateway/README.md) §7,
+or let the CLI do it.)*
+
+With the TX node attached over USB/Wi-Fi the repository's transmitter does
+the signing, sequencing and ACK matching for you:
+
+```bash
+# USB-attached TX node: the meshtastic TCP API is not available over serial,
+# so first expose it, e.g. by enabling Wi-Fi on the TX node (provisioner does
+# this) and then:
+python3 meshtasticd-config/send_control_cmd.py \
+  --mesh-host <tx-node-ip> --mesh-port 4403 \
+  --target shelly1-01 --action ON
+
+# Negative tests (must be silently dropped by the gateway - no ACK):
+python3 meshtasticd-config/send_control_cmd.py --mesh-host <tx-node-ip> --mesh-port 4403 --target shelly1-01 --action ON --replay
+python3 meshtasticd-config/send_control_cmd.py --mesh-host <tx-node-ip> --mesh-port 4403 --target shelly1-01 --action ON --bad-sig
+```
+
+`send_control_cmd.py` uses `seq = int(time.time() % 1_000_000)` unless
+`--seq` is given, so consecutive commands are normally monotonic. **Caveat**:
+the modulo makes `seq` wrap roughly every 11.6 days; after a wrap the gateway
+will reject new commands as replays until it is rebooted (or you pass an
+explicit larger `--seq`). Fixing this is part of Phase 5. When sending by
+hand from the phone app you must increment `seq` yourself - the gateway
+remembers the last accepted `seq` **per sender** until it reboots (state is
+in RAM only).
+
+Expected ACK on the TX side (as a text message on the `mqtt` channel, or
+printed by `send_control_cmd.py`):
+
+```json
+{"ver": 1, "device": "shelly1-01", "state": "ON", "ack_seq": 1001, "status": "OK"}
 ```
 
 ### Security Guarantees in Effect:
 1. **LoRa Private PSK**: Protects the message in flight over the air.
-2. **HMAC-SHA256 Signature**: Guarantees only someone with the shared secret can issue commands.
-3. **Monotonic Sequence (`seq`)**: Prevents any eavesdropper from capturing and replaying previous packets.
-4. **Air-Gapped & Offline**: Zero internet connection, zero external servers, runs entirely locally.
+2. **Sender whitelist**: Only Node IDs listed in `ALLOWED_NODES` (firmware) / `--allowed-nodes` (Python bridge) are processed.
+3. **HMAC-SHA256 Signature**: Guarantees only someone with the shared secret can issue commands.
+4. **Monotonic Sequence (`seq`)**: Prevents any eavesdropper from capturing and replaying previous packets.
+5. **Air-Gapped & Offline**: Zero internet connection, zero external servers, runs entirely locally.
+
+### Known limitations of the current design
+
+- The **ACK is not signed**; a rogue node on the channel could forge a
+  positive ACK. The relay state itself cannot be forged that way.
+- Anti-replay state lives in **RAM**: after an ESP32 reboot the first command
+  of any `seq` is accepted, so an attacker who captured an old packet could
+  replay it once per gateway reboot. Using a Unix timestamp as `seq` (what
+  `send_control_cmd.py` does) shrinks this window in practice; persisting
+  the last `seq` to NVS is on the roadmap.
+- The embedded broker has **no authentication**: anyone who knows the SoftAP
+  password can publish to `<target>/command/switch:0` directly, bypassing
+  the mesh and the HMAC. Choose a strong `WIFI_PASS`.
+- `target` must **exactly** equal the Shelly's MQTT prefix; there is no
+  discovery. A typo results in a silent no-op (command published to a topic
+  nobody listens on, then a 30 s pending-request timeout).

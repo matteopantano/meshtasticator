@@ -89,6 +89,67 @@ class TestGen1CommandHandling(unittest.TestCase):
         self.sim.client.publish.assert_not_called()
 
 
+class TestGen2MqttControlHandling(unittest.TestCase):
+    """Gen 2+/Gen3/Gen4 "MQTT control" topic: <id>/command/switch:0.
+
+    This is the canonical topic published by mqtt_bridge.py and the ESP32
+    gateway firmware since Phase 4, so the simulator must honour it for the
+    fully-simulated Docker flow to produce an ACK.
+    """
+
+    def setUp(self):
+        self.sim = ShellySimulator(device_id="shelly1-sim01")
+        self.sim.client = MagicMock()
+        self.topic = "shelly1-sim01/command/switch:0"
+
+    def test_on_sets_state_true_and_publishes(self):
+        self.sim.state = False
+        self.sim.on_message(None, None, make_msg(self.topic, "on"))
+        self.assertTrue(self.sim.state)
+
+        calls = self.sim.client.publish.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1].args[0], "shelly1-sim01/status/switch:0")
+        self.assertTrue(json.loads(calls[1].args[1])["output"])
+
+    def test_off_sets_state_false(self):
+        self.sim.state = True
+        self.sim.on_message(None, None, make_msg(self.topic, "off"))
+        self.assertFalse(self.sim.state)
+
+    def test_toggle_flips_state(self):
+        self.sim.state = False
+        self.sim.on_message(None, None, make_msg(self.topic, "toggle"))
+        self.assertTrue(self.sim.state)
+        self.sim.on_message(None, None, make_msg(self.topic, "toggle"))
+        self.assertFalse(self.sim.state)
+
+    def test_payload_is_case_insensitive(self):
+        self.sim.state = False
+        self.sim.on_message(None, None, make_msg(self.topic, "ON"))
+        self.assertTrue(self.sim.state)
+
+    def test_status_update_republishes_without_changing_state(self):
+        self.sim.state = True
+        self.sim.on_message(None, None, make_msg(self.topic, "status_update"))
+        self.assertTrue(self.sim.state)
+        self.sim.client.publish.assert_called()
+
+    def test_unknown_command_leaves_state_and_does_not_publish(self):
+        self.sim.state = True
+        self.sim.on_message(None, None, make_msg(self.topic, "banana"))
+        self.assertTrue(self.sim.state)
+        self.sim.client.publish.assert_not_called()
+
+    def test_subscribes_to_control_topic_on_connect(self):
+        client = MagicMock()
+        self.sim.on_connect(client, None, None, 0)
+        subscribed = [c.args[0] for c in client.subscribe.call_args_list]
+        self.assertIn("shelly1-sim01/command/switch:0", subscribed)
+        self.assertIn("shellies/shelly1-sim01/relay/0/command", subscribed)
+        self.assertIn("shelly1-sim01/rpc", subscribed)
+
+
 class TestGen2RpcHandling(unittest.TestCase):
     def setUp(self):
         self.sim = ShellySimulator(device_id="shelly1-sim01")

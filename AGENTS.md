@@ -43,7 +43,7 @@ Meshtasticator/
 │   ├── mqtt_bridge.py             # Meshtastic-to-MQTT security gateway (HMAC + anti-replay + ACK)
 │   ├── provision_nodes.py         # 1-Click node provisioner (simulated containers or physical USB/Wi-Fi)
 │   ├── send_control_cmd.py        # Secure HMAC signed command transmitter client
-│   ├── shelly_simulator.py        # Gen 1 & Gen 2 Shelly smart relay emulator over MQTT
+│   ├── shelly_simulator.py        # Shelly relay emulator (Gen 1, Gen 2 RPC & Gen 2+ command/switch:0 topics)
 │   └── nginx.conf                 # meshtastic-web NGINX reverse-proxy
 │
 ├── lib/                           # Core discrete event simulator library

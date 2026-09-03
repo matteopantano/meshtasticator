@@ -105,10 +105,10 @@ Full details, JSON payload schemas, security specs, and simulation steps are des
 - **Security & Authorization**: Gateway checks sender Node ID whitelist, verifies `HMAC-SHA256(CONTROL_SECRET, ...)` signature, and enforces monotonic `seq` to prevent replay attacks.
 - **Shelly MQTT Integration**: 
   - **Meshtastic RX (Gateway / Receiver)**: `meshtasticd-rx` daemon (TCP 4404 via proxy `ws-proxy-rx`, Web UI on `http://localhost:8080`).
-  - **Meshtastic TX (Controller / Transmitter)**: `meshtasticd-tx` daemon (TCP 4405 via proxy `ws-proxy-tx`, Web UI on `http://localhost:8081`).
-  - **MQTT Broker**: `mosquitto-broker` (Eclipse Mosquitto 2.0 on port 1883).
-  - **Shelly Smart Relay Simulator**: `meshtasticd-config/shelly_simulator.py` (simulates Gen1/Gen2 Shelly topics).
-  - **Gateway Bridge**: `meshtasticd-config/mqtt_bridge.py` (receives signed packets from RX node, validates HMAC-SHA256 and sequence counter, forwards to MQTT, sends ACK).
+  - **Meshtastic TX (Controller / Transmitter)**: `meshtasticd-tx` daemon (TCP mux `4406` via proxy `ws-proxy-tx`, HTTP/WebSocket API on `4405`).
+  - **MQTT Broker**: `mosquitto-broker` (Eclipse Mosquitto 2.0 on port 1883) - required for the fully simulated flow; stop it (`docker compose stop mqtt-broker`) when a physical ESP32 is the broker.
+  - **Shelly Smart Relay Simulator**: `meshtasticd-config/shelly_simulator.py` (accepts Gen 1, Gen 2 RPC and Gen 2+ `command/switch:0` command topics; publishes Gen 1 and Gen 2 status topics).
+  - **Gateway Bridge**: `meshtasticd-config/mqtt_bridge.py` (receives signed packets from RX node, validates whitelist, sequence counter and HMAC-SHA256, publishes `<target>/command/switch:0`, sends ACK on status change).
   - **Transmitter Test Client**: `meshtasticd-config/send_control_cmd.py` (sends signed packets to TX node).
 
 ---

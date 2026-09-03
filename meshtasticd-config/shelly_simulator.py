@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 """
 Shelly Smart Relay Simulator
-Emulates a physical Shelly 1 / Shelly Plus 1 relay connected to an MQTT broker.
-Subscribes to Shelly command topics and publishes real-time status updates.
+Emulates a physical Shelly 1 / Shelly Plus 1 / Shelly 1 Gen3-Gen4 relay
+connected to an MQTT broker. Subscribes to all three Shelly command formats
+and publishes real-time status updates on both Gen 1 and Gen 2+ topics:
+
+  Gen 1        : shellies/<id>/relay/0/command   (payload: on|off|toggle)
+  Gen 2+ RPC   : <id>/rpc                         (JSON-RPC Switch.Set/Toggle)
+  Gen 2+ ctrl  : <id>/command/switch:0            (payload: on|off|toggle|status_update)
+
+The last format ("MQTT control", enabled on real devices via the
+`enable_control` MQTT setting) is the one used by `mqtt_bridge.py` and the
+ESP32 gateway firmware since Phase 4.
 """
 
 import sys
@@ -58,9 +67,15 @@ class ShellySimulator:
             gen2_rpc_topic = f"{self.device_id}/rpc"
             client.subscribe(gen2_rpc_topic)
 
+            # Subscribe to Gen 2+/Gen3/Gen4 "MQTT control" command topic
+            # (the canonical topic published by mqtt_bridge.py / ESP32 firmware)
+            gen2_ctrl_topic = f"{self.device_id}/command/switch:0"
+            client.subscribe(gen2_ctrl_topic)
+
             print(f"{CYAN}[Shelly Simulator]{RESET} Subscribed to topics:")
-            print(f"  ├─ Gen 1 Command: {BOLD}{gen1_cmd_topic}{RESET}")
-            print(f"  └─ Gen 2 RPC:     {BOLD}{gen2_rpc_topic}{RESET}")
+            print(f"  ├─ Gen 1 Command:  {BOLD}{gen1_cmd_topic}{RESET}")
+            print(f"  ├─ Gen 2 RPC:      {BOLD}{gen2_rpc_topic}{RESET}")
+            print(f"  └─ Gen 2+ Control: {BOLD}{gen2_ctrl_topic}{RESET}")
 
             # Initial state publication
             self.publish_state()
@@ -83,6 +98,22 @@ class ShellySimulator:
                 self.state = not self.state
             else:
                 print(f"{RED}[Warning] Unknown Gen 1 command: {cmd}{RESET}")
+                return
+            self.publish_state()
+
+        # Gen 2+/Gen3/Gen4 "MQTT control" handler (<id>/command/switch:0)
+        elif topic.endswith("/command/switch:0"):
+            cmd = payload_raw.lower()
+            if cmd == "on":
+                self.state = True
+            elif cmd == "off":
+                self.state = False
+            elif cmd == "toggle":
+                self.state = not self.state
+            elif cmd == "status_update":
+                pass  # Real devices re-publish <id>/status/switch:0 unchanged
+            else:
+                print(f"{RED}[Warning] Unknown Gen 2+ control command: {cmd}{RESET}")
                 return
             self.publish_state()
 

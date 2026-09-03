@@ -14,7 +14,7 @@ A comprehensive simulation, testbed, and IoT-integration suite for
 | 5 | 🔗 **Multi-Node Docker Testbed & IoT/MQTT Pipeline** — two-node mesh + secure Meshtastic ➔ MQTT ➔ Shelly relay control | [Jump to §5](#-5-multi-node-testbed--iotmqtt-integration) | [docs/05_multi_node_iot_mqtt_pipeline.md](docs/05_multi_node_iot_mqtt_pipeline.md) |
 | 6 | 🔌 **Standalone ESP32 Gateway Firmware** — replaces the Python MQTT bridge on real hardware (SoftAP + embedded broker + native HMAC) | [Jump to §6](#-6-standalone-esp32-gateway-firmware) | [firmware/esp32-gateway/README.md](firmware/esp32-gateway/README.md) |
 | 7 | 🔧 **Physical Hardware Deployment** — deploy the whole pipeline on real Meshtastic nodes + ESP32 + Shelly, zero cloud/computer required | [Jump to §7](#-7-physical-hardware-deployment) | [docs/07_physical_hardware_deployment.md](docs/07_physical_hardware_deployment.md) |
-| 8 | 🧪 **Test Suite** — 62 unit tests covering the simulator core and the IoT security pipeline | [Jump to §8](#-8-tests--environment-setup) | [`tests/`](tests/) |
+| 8 | 🧪 **Test Suite** — 69 unit tests covering the simulator core and the IoT security pipeline | [Jump to §8](#-8-tests--environment-setup) | [`tests/`](tests/) |
 
 ---
 
@@ -183,7 +183,15 @@ whitelisting.
    python3 meshtasticd-config/send_control_cmd.py \
      --mesh-port 4406 --target shelly1-sim01 --action ON
    ```
-   *(Watch the RF bridge relay the packet from TX to RX, verify HMAC & sequence, publish to MQTT, toggle the Shelly relay, and relay the signed status ACK back to TX!)*
+   *(Watch the RF bridge relay the packet from TX to RX, verify HMAC & sequence, publish `shelly1-sim01/command/switch:0` to MQTT, toggle the Shelly relay, and relay the status ACK back to TX!)*
+
+> [!NOTE]
+> Since Phase 4 the gateway (`mqtt_bridge.py` and the ESP32 firmware)
+> publishes commands in the **Shelly Gen 2+/Gen4 "MQTT control"** format
+> (`<target>/command/switch:0`, payload `on|off|toggle`), which was validated
+> against a real Shelly 1 Gen4. Gen 1 devices (`shellies/...` topics) are
+> currently not controllable. On a real Gen 2+ Shelly you must enable
+> *"Generic status update over MQTT"* for the ACK to work.
 
 - **Full pipeline design, security spec, and hybrid-hardware testing guide**: see [docs/05_multi_node_iot_mqtt_pipeline.md](docs/05_multi_node_iot_mqtt_pipeline.md).
 
@@ -193,18 +201,24 @@ whitelisting.
 
 `firmware/esp32-gateway/` is a self-contained Arduino/PlatformIO sketch
 that replaces the Python `mqtt_bridge.py` runtime for physical, non-Docker
-deployments: it hosts its own Wi-Fi SoftAP (`Mesh-Gateway` @
+deployments: it hosts its own Wi-Fi SoftAP (`ESP32-Hub` @
 `192.168.4.1`), an embedded MQTT broker (`TinyMqtt`), and performs the same
 HMAC-SHA256 + anti-replay + whitelist security checks natively via
-`mbedtls`.
+`mbedtls`. Wi-Fi credentials, the HMAC secret, the LoRa region and the
+gateway Node ID are injected from the repo-root `.env` at build time.
 
 ### Quickstart
 ```bash
+cp .env.example .env     # edit WIFI_PASS / CONTROL_SECRET / LORA_REGION / GATEWAY_NODE_ID
 cd firmware/esp32-gateway
 pio run                  # build
 pio run -t upload        # flash to an ESP32 over USB
 pio device monitor       # serial monitor at 115200 baud
 ```
+
+**Status**: build, SoftAP and embedded broker verified on hardware (Phase 4).
+The firmware's own HMAC/anti-replay/ACK code path is not yet verified
+end-to-end - see [ROADMAP.md](ROADMAP.md) Phase 5.
 
 - **Full wiring, config, flashing & real-Shelly connection guide**: see
   [firmware/esp32-gateway/README.md](firmware/esp32-gateway/README.md).
@@ -220,14 +234,20 @@ computer required at runtime**: it hosts its own Wi-Fi SoftAP (`ESP32-Hub` @
 executes the HMAC-SHA256 signature verification directly in C++ on the
 microcontroller.
 
-Provision an RX node over USB to join the ESP32 Hub:
-```bash
-python3 meshtasticd-config/provision_nodes.py \
-  --serial /dev/ttyUSB0 --role rx --wifi-ssid "ESP32-Hub" \
-  --wifi-pass "YourSecureWifiPass123" --mqtt-host "192.168.4.1"
-```
+1. **Provision the RX gateway node** over USB to join the ESP32 Hub
+   (values default to `.env`; flags shown for clarity):
+   ```bash
+   python3 meshtasticd-config/provision_nodes.py \
+     --serial /dev/ttyUSB0 --role rx --wifi-ssid "ESP32-Hub" \
+     --wifi-pass "YourSecureWifiPass123" --mqtt-host "192.168.4.1"
 
-3. **Connect Shelly Relay**: Join a real Shelly relay to the ESP32's Wi-Fi (`ESP32-Hub`) and point its MQTT client at `192.168.4.1:1883`.
+   # Not yet automated - enable JSON uplink and the "mqtt" downlink channel:
+   meshtastic --port /dev/ttyUSB0 --ch-index 0 --ch-set uplink_enabled true
+   meshtastic --port /dev/ttyUSB0 --ch-add mqtt
+   meshtastic --port /dev/ttyUSB0 --ch-index <idx> --ch-set downlink_enabled true
+   ```
+2. **Provision the TX node**: `python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB1 --role tx`
+3. **Connect the Shelly relay** (Gen 2+/Gen4): join it to `ESP32-Hub`, MQTT server `192.168.4.1:1883`, custom prefix = your `target`, and enable *"Generic status update over MQTT"*.
 
 - **Full bill of materials, wiring diagram, and step-by-step guide**: see
   [docs/07_physical_hardware_deployment.md](docs/07_physical_hardware_deployment.md).
@@ -247,7 +267,7 @@ pip install -r requirements.txt
 ```bash
 python3 -m unittest discover tests -v
 ```
-62 tests cover the discrete-event simulator core (physics/PHY, MAC,
+69 tests cover the discrete-event simulator core (physics/PHY, MAC,
 routing, node behavior) as well as the IoT security pipeline
 (`tests/test_mqtt_bridge.py`, `tests/test_shelly_simulator.py`) — the
 latter run with pure Python mocks, so no Docker/MQTT broker/hardware is

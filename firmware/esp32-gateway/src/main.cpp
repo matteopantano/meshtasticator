@@ -383,9 +383,9 @@ void processMeshCommand(uint32_t fromNodeIdDecimal, const String& commandText) {
   setLastSeenSeq(fromId, seq);
   setPendingRequest(target, String(fromNodeIdDecimal), seq);
 
-  // Publish command to both Shelly command formats:
-  // - Gen 1: shellies/<id>/relay/0/command with payload on/off
-  // - Gen 2+/RPC: <id>/rpc with JSON-RPC payload
+  // Publish command to Shelly command formats:
+  // - Gen 1: shellies/<id>/relay/0/command with payload on/off/toggle
+  // - Gen 4/Gen 2 MQTT Control: <id>/command/switch:0 with payload on/off/toggle
   // Devices will ignore the format they don't support.
   String shellyCmdTopicGen1 = "shellies/" + target + "/relay/0/command";
   String shellyPayloadGen1 = action;
@@ -393,26 +393,11 @@ void processMeshCommand(uint32_t fromNodeIdDecimal, const String& commandText) {
   mqttClient.publish(shellyCmdTopicGen1.c_str(), shellyPayloadGen1.c_str());
   Serial.printf("[MQTT Publish][Gen1] Topic: %s | Payload: %s\n", shellyCmdTopicGen1.c_str(), shellyPayloadGen1.c_str());
 
-  String shellyCmdTopicRpc = target + "/rpc";
-  JsonDocument rpcDoc;
-  rpcDoc["id"] = 1;
-  rpcDoc["src"] = "meshtastic";
-
-  if (action == "TOGGLE") {
-    rpcDoc["method"] = "Switch.Toggle";
-    JsonObject params = rpcDoc["params"].to<JsonObject>();
-    params["id"] = 0;
-  } else {
-    rpcDoc["method"] = "Switch.Set";
-    JsonObject params = rpcDoc["params"].to<JsonObject>();
-    params["id"] = 0;
-    params["on"] = (action == "ON");
-  }
-
-  String rpcPayload;
-  serializeJson(rpcDoc, rpcPayload);
-  mqttClient.publish(shellyCmdTopicRpc.c_str(), rpcPayload.c_str());
-  Serial.printf("[MQTT Publish][RPC] Topic: %s | Payload: %s\n", shellyCmdTopicRpc.c_str(), rpcPayload.c_str());
+  String shellyCmdTopicGen4 = target + "/command/switch:0";
+  String shellyPayloadGen4 = action;
+  shellyPayloadGen4.toLowerCase();
+  mqttClient.publish(shellyCmdTopicGen4.c_str(), shellyPayloadGen4.c_str());
+  Serial.printf("[MQTT Publish][Gen4] Topic: %s | Payload: %s\n", shellyCmdTopicGen4.c_str(), shellyPayloadGen4.c_str());
 }
 
 // ============================================================

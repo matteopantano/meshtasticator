@@ -241,7 +241,11 @@ void setPendingRequest(const String& target, const String& fromId, long seq) {
   }
   for (size_t i = 0; i < MAX_PENDING_REQUESTS; i++) {
     if (!pendingRequests[i].used) {
-      pendingRequests[i] = {target, fromId, seq, millis(), true};
+      pendingRequests[i].target = target;
+      pendingRequests[i].fromId = fromId;
+      pendingRequests[i].seq = seq;
+      pendingRequests[i].timestampMs = millis();
+      pendingRequests[i].used = true;
       return;
     }
   }
@@ -254,7 +258,11 @@ void setPendingRequest(const String& target, const String& fromId, long seq) {
       oldestIdx = i;
     }
   }
-  pendingRequests[oldestIdx] = {target, fromId, seq, millis(), true};
+  pendingRequests[oldestIdx].target = target;
+  pendingRequests[oldestIdx].fromId = fromId;
+  pendingRequests[oldestIdx].seq = seq;
+  pendingRequests[oldestIdx].timestampMs = millis();
+  pendingRequests[oldestIdx].used = true;
 }
 
 bool popPendingRequest(const String& target, String& outFromId, long& outSeq) {
@@ -375,8 +383,9 @@ void processMeshCommand(uint32_t fromNodeIdDecimal, const String& commandText) {
   setLastSeenSeq(fromId, seq);
   setPendingRequest(target, String(fromNodeIdDecimal), seq);
 
-  // Publish command to the Shelly's Gen 1 command topic.
-  String shellyCmdTopic = "shellies/" + target + "/relay/0/command";
+  // Publish command to Shelly Gen4 MQTT control topic:
+  // <id>/command/switch:0 with payload on/off/toggle
+  String shellyCmdTopic = target + "/command/switch:0";
   String shellyPayload = action;
   shellyPayload.toLowerCase();
   mqttClient.publish(shellyCmdTopic.c_str(), shellyPayload.c_str());

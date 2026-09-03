@@ -64,3 +64,7 @@ for env_key, macro_name in macro_mappings.items():
 if cpp_defines:
     env.Append(CPPDEFINES=cpp_defines)
     print(f"[load_env.py] Successfully injected defines: {[d[0] for d in cpp_defines]}")
+
+# TinyConsole (pulled by TinyMqtt) uses std::exchange but misses <utility>
+# on some toolchains. Apply the include only to C++ compilation units.
+env.Append(CXXFLAGS=["-include", "utility"])

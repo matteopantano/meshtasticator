@@ -241,7 +241,11 @@ void setPendingRequest(const String& target, const String& fromId, long seq) {
   }
   for (size_t i = 0; i < MAX_PENDING_REQUESTS; i++) {
     if (!pendingRequests[i].used) {
-      pendingRequests[i] = {target, fromId, seq, millis(), true};
+      pendingRequests[i].target = target;
+      pendingRequests[i].fromId = fromId;
+      pendingRequests[i].seq = seq;
+      pendingRequests[i].timestampMs = millis();
+      pendingRequests[i].used = true;
       return;
     }
   }
@@ -254,7 +258,11 @@ void setPendingRequest(const String& target, const String& fromId, long seq) {
       oldestIdx = i;
     }
   }
-  pendingRequests[oldestIdx] = {target, fromId, seq, millis(), true};
+  pendingRequests[oldestIdx].target = target;
+  pendingRequests[oldestIdx].fromId = fromId;
+  pendingRequests[oldestIdx].seq = seq;
+  pendingRequests[oldestIdx].timestampMs = millis();
+  pendingRequests[oldestIdx].used = true;
 }
 
 bool popPendingRequest(const String& target, String& outFromId, long& outSeq) {
@@ -375,12 +383,36 @@ void processMeshCommand(uint32_t fromNodeIdDecimal, const String& commandText) {
   setLastSeenSeq(fromId, seq);
   setPendingRequest(target, String(fromNodeIdDecimal), seq);
 
-  // Publish command to the Shelly's Gen 1 command topic.
-  String shellyCmdTopic = "shellies/" + target + "/relay/0/command";
-  String shellyPayload = action;
-  shellyPayload.toLowerCase();
-  mqttClient.publish(shellyCmdTopic.c_str(), shellyPayload.c_str());
-  Serial.printf("[MQTT Publish] Topic: %s | Payload: %s\n", shellyCmdTopic.c_str(), shellyPayload.c_str());
+  // Publish command to both Shelly command formats:
+  // - Gen 1: shellies/<id>/relay/0/command with payload on/off
+  // - Gen 2+/RPC: <id>/rpc with JSON-RPC payload
+  // Devices will ignore the format they don't support.
+  String shellyCmdTopicGen1 = "shellies/" + target + "/relay/0/command";
+  String shellyPayloadGen1 = action;
+  shellyPayloadGen1.toLowerCase();
+  mqttClient.publish(shellyCmdTopicGen1.c_str(), shellyPayloadGen1.c_str());
+  Serial.printf("[MQTT Publish][Gen1] Topic: %s | Payload: %s\n", shellyCmdTopicGen1.c_str(), shellyPayloadGen1.c_str());
+
+  String shellyCmdTopicRpc = target + "/rpc";
+  JsonDocument rpcDoc;
+  rpcDoc["id"] = 1;
+  rpcDoc["src"] = "meshtastic";
+
+  if (action == "TOGGLE") {
+    rpcDoc["method"] = "Switch.Toggle";
+    JsonObject params = rpcDoc["params"].to<JsonObject>();
+    params["id"] = 0;
+  } else {
+    rpcDoc["method"] = "Switch.Set";
+    JsonObject params = rpcDoc["params"].to<JsonObject>();
+    params["id"] = 0;
+    params["on"] = (action == "ON");
+  }
+
+  String rpcPayload;
+  serializeJson(rpcDoc, rpcPayload);
+  mqttClient.publish(shellyCmdTopicRpc.c_str(), rpcPayload.c_str());
+  Serial.printf("[MQTT Publish][RPC] Topic: %s | Payload: %s\n", shellyCmdTopicRpc.c_str(), rpcPayload.c_str());
 }
 
 // ============================================================

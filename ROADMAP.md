@@ -95,38 +95,82 @@ signing specification and payload schemas.
 
 ---
 
-## Phase 4 - 🔲 TODO: Technical Debt Refactor in Discrete Radio Simulator Core
+## Phase 4 - ✅ DONE: Hybrid Docker + ESP32 + Real Shelly Bring-Up (Option 5 + Option 6)
 
-**Goal**: Address long-standing `TODO`s that affect maintainability and
-correctness of the discrete-event simulator core (not blocking, lower
-priority).
+**Goal**: Validate and stabilize the real-hardware path using simulated mesh
+nodes + ESP32 firmware gateway + physical Shelly, including topic-format
+alignment for newer Shelly devices.
+
+**Delivered (code/config changes)**:
+
+- `firmware/esp32-gateway/platformio.ini`
+  - Switched TinyMqtt dependency to Git source for reliable resolution.
+  - Forced modern C++ standard flags to resolve dependency compile issues.
+- `firmware/esp32-gateway/load_env.py`
+  - Added C++-only include flag handling used to fix toolchain/header
+    compatibility during firmware build.
+- `firmware/esp32-gateway/src/main.cpp`
+  - Fixed `PendingRequest` assignment compatibility issue.
+  - Added/updated command publishing for Shelly topic formats.
+  - Finalized outbound command topic for Shelly 1 Gen4 as:
+    `<target>/command/switch:0` with payload `on|off|toggle`.
+  - Kept status handling for topic `<target>/status/switch:0`.
+- `meshtasticd-config/mqtt_bridge.py`
+  - Finalized outbound command topic for bridge runtime to:
+    `<target>/command/switch:0` with payload `on|off|toggle`.
+  - Kept inbound status parsing for `<target>/status/switch:0` and existing
+    ACK forwarding to mesh.
+
+**Validation status**:
+
+- PlatformIO build/upload on Windows succeeded for ESP32.
+- ESP32 AP + embedded broker startup confirmed via serial monitor.
+- Mesh packet flow TX → RX confirmed in simulated stack.
+- Security checks (whitelist / anti-replay / HMAC) confirmed in runtime logs.
+- Real Shelly actuation and ACK flow reported working after topic alignment to
+  Shelly 1 Gen4 MQTT format.
+
+**Known bugs / limitations still present**:
+
+1. **Hybrid native-meshtasticd MQTT fragility on Windows/Docker Desktop**  
+   In the mixed setup (containers + physical ESP32 broker), `meshtasticd`
+   native MQTT connectivity may fail intermittently depending on host routing
+   state, network switching, or address persistence after reprovision.
+
+2. **Provisioning ergonomics gap (`provision_nodes.py`)**  
+   No dedicated `--mqtt-port` argument; port must be embedded in the address
+   or set post-provision. This increases drift risk after restarts/reprovision.
+
+3. **Topic strategy currently assumes Gen4 target in active path**  
+   The active command path now publishes to `<target>/command/switch:0`.
+   Multi-generation auto-detection/routing policy is not centralized in one
+   config flag and could be improved for heterogeneous fleets.
+
+4. **Operational coupling to exact Shelly topic prefix**  
+   End-to-end success requires `target` to exactly match the Shelly MQTT topic
+   prefix. There is no automated discovery/validation step in sender/bridge.
+
+**Recommended next improvements for follow-up agent**:
+
+- Add explicit MQTT host/port/topic-profile options to
+  `meshtasticd-config/provision_nodes.py` and persist reliably.
+- Add optional topic-profile mode (`gen1`, `gen2/gen4`, `auto`) in
+  `mqtt_bridge.py` and ESP32 firmware with clear logging of selected route.
+- Add a lightweight integration smoke test script that verifies:
+  broker reachability, publish topic, status topic, and ACK return path.
+- Add documentation update in `docs/05_multi_node_iot_mqtt_pipeline.md` and
+  `firmware/esp32-gateway/README.md` for Shelly 1 Gen4 canonical topic usage.
+
+---
+
+## Phase 5 - 🔲 TODO: TBD
+
+**Goal**: TBD
 
 **Files to modify**:
-- `lib/phy.py`:
-  - Refactor `zero_link_budget(dist)` / `zero_link_budget_with_gain(dist,
-    gain)` (and the module-load-time `MAXRANGE = rootFinder(zero_link_budget,
-    1500)`) to accept an explicit `conf` parameter instead of relying on the
-    module-global `conf = CONFIG` singleton, so tests/scripts that mutate a
-    separate `Config()` instance get correct results.
-  - Implement the `wide_lora` region bandwidth adjustment noted in the TODO
-    at `lib/config.py:318` (`bw` should change based on the region's
-    `wide_lora` setting; currently unimplemented).
-- `lib/discrete_event_sim.py`:
-  - Optimize the O(packets * nodes) collision/sensed counting loops (around
-    line 67-68) to use per-node counters accumulated during the simulation
-    instead of a full post-hoc scan.
 
 **Verification**:
-```bash
-.venv/bin/python3 -m unittest discover tests -v
-```
-Pay special attention to `tests/test_discrete_event_sim.py` -
-`test_discrete_sim_ten_nodes` and `test_sim_does_not_change_config`, which
-assert exact hardcoded simulation result values and that `Config` objects
-are not mutated by a simulation run. If refactoring changes any computed
-values, either it's an unintended regression (fix it) or an intentional
-correction (update the hardcoded expected values with a comment explaining
-why).
+
 
 ---
 

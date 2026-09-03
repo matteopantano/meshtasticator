@@ -383,21 +383,13 @@ void processMeshCommand(uint32_t fromNodeIdDecimal, const String& commandText) {
   setLastSeenSeq(fromId, seq);
   setPendingRequest(target, String(fromNodeIdDecimal), seq);
 
-  // Publish command to Shelly command formats:
-  // - Gen 1: shellies/<id>/relay/0/command with payload on/off/toggle
-  // - Gen 4/Gen 2 MQTT Control: <id>/command/switch:0 with payload on/off/toggle
-  // Devices will ignore the format they don't support.
-  String shellyCmdTopicGen1 = "shellies/" + target + "/relay/0/command";
-  String shellyPayloadGen1 = action;
-  shellyPayloadGen1.toLowerCase();
-  mqttClient.publish(shellyCmdTopicGen1.c_str(), shellyPayloadGen1.c_str());
-  Serial.printf("[MQTT Publish][Gen1] Topic: %s | Payload: %s\n", shellyCmdTopicGen1.c_str(), shellyPayloadGen1.c_str());
-
-  String shellyCmdTopicGen4 = target + "/command/switch:0";
-  String shellyPayloadGen4 = action;
-  shellyPayloadGen4.toLowerCase();
-  mqttClient.publish(shellyCmdTopicGen4.c_str(), shellyPayloadGen4.c_str());
-  Serial.printf("[MQTT Publish][Gen4] Topic: %s | Payload: %s\n", shellyCmdTopicGen4.c_str(), shellyPayloadGen4.c_str());
+  // Publish command to Shelly Gen4 MQTT control topic:
+  // <id>/command/switch:0 with payload on/off/toggle
+  String shellyCmdTopic = target + "/command/switch:0";
+  String shellyPayload = action;
+  shellyPayload.toLowerCase();
+  mqttClient.publish(shellyCmdTopic.c_str(), shellyPayload.c_str());
+  Serial.printf("[MQTT Publish] Topic: %s | Payload: %s\n", shellyCmdTopic.c_str(), shellyPayload.c_str());
 }
 
 // ============================================================

@@ -231,8 +231,8 @@ class MeshtasticMQTTBridge:
                 "timestamp": time.time()
             }
 
-            # 5. Publish Command to MQTT Broker for Shelly
-            mqtt_cmd_topic = f"shellies/{target}/relay/0/command"
+            # 5. Publish command to Shelly Gen4 MQTT control topic
+            mqtt_cmd_topic = f"{target}/command/switch:0"
             mqtt_payload = action.lower()
             print(f"{CYAN}📤 [MQTT Publish]{RESET} Topic: {BOLD}{mqtt_cmd_topic}{RESET} | Payload: {BOLD}{mqtt_payload}{RESET}")
             self.mqtt_client.publish(mqtt_cmd_topic, mqtt_payload, qos=1)

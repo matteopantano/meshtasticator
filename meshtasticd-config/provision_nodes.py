@@ -24,6 +24,10 @@ DEFAULT_WIFI_PASS_TX = os.environ.get("WIFI_PASS_TX", "YourHomeWifiPassword")
 DEFAULT_MQTT_SIM     = os.environ.get("MQTT_HOST_SIM", "mqtt-broker")
 DEFAULT_MQTT_REAL    = os.environ.get("MQTT_HOST_REAL", "192.168.4.1")
 DEFAULT_REGION       = os.environ.get("LORA_REGION", "US")
+DEFAULT_NODE_NAME_RX = os.environ.get("NODE_NAME_RX", "Mesh RX Node")
+DEFAULT_NODE_SHORT_RX = os.environ.get("NODE_SHORT_RX", "RX")
+DEFAULT_NODE_NAME_TX = os.environ.get("NODE_NAME_TX", "Mesh TX Node")
+DEFAULT_NODE_SHORT_TX = os.environ.get("NODE_SHORT_TX", "TX")
 
 
 GREEN  = "\033[92m"
@@ -139,8 +143,8 @@ def main():
             success = provision_node(
                 conn_args=["--host", "localhost:4404"],
                 role="rx",
-                long_name="Gateway RX",
-                short_name="RX",
+                long_name=DEFAULT_NODE_NAME_RX,
+                short_name=DEFAULT_NODE_SHORT_RX,
                 mqtt_host=args.mqtt_host or DEFAULT_MQTT_SIM,
                 wifi_ssid="",
                 wifi_pass="",
@@ -156,8 +160,8 @@ def main():
             success = provision_node(
                 conn_args=["--host", "localhost:4406"],
                 role="tx",
-                long_name="Remote TX",
-                short_name="TX",
+                long_name=DEFAULT_NODE_NAME_TX,
+                short_name=DEFAULT_NODE_SHORT_TX,
                 mqtt_host=args.mqtt_host or DEFAULT_MQTT_SIM,
                 wifi_ssid="",
                 wifi_pass="",
@@ -180,8 +184,12 @@ def main():
     conn_args = ["--port", args.serial] if args.serial else ["--host", args.host]
 
     role = args.role if args.role != "all" else "rx"
-    long_name = f"Mesh {role.upper()} Node"
-    short_name = role[:4].upper()
+    if role == "rx":
+        long_name = DEFAULT_NODE_NAME_RX
+        short_name = DEFAULT_NODE_SHORT_RX
+    else:
+        long_name = DEFAULT_NODE_NAME_TX
+        short_name = DEFAULT_NODE_SHORT_TX
 
     if role == "rx":
         wifi_ssid = args.wifi_ssid or DEFAULT_WIFI_SSID_RX

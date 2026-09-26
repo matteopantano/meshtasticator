@@ -128,7 +128,7 @@ python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB1 --role tx
 ```
 
 This automatically:
-1. Names the node (`Mesh RX Node` / `Mesh TX Node`).
+1. Names the node from `.env` (`NODE_NAME_RX` / `NODE_NAME_TX`, with short names `NODE_SHORT_RX` / `NODE_SHORT_TX`; defaults are `Mesh RX Node` / `Mesh TX Node`).
 2. Configures the LoRa frequency region (`LORA_REGION` from `.env`, or `--region`).
 3. **For RX Gateway**: Connects to the ESP32 Hub Wi-Fi (`WIFI_SSID_RX="ESP32-Hub"`) and enables the native Meshtastic MQTT client pointing to the ESP32 (`mqtt.address` = `MQTT_HOST_REAL`, default `192.168.4.1`; `json_enabled true`, `encryption_enabled false`, `root msh`).
 4. **For Remote TX**: Connects to your local Wi-Fi (`WIFI_SSID_TX="YourHomeWifi"`) so you can access its Web UI from your phone/browser on your home network, while leaving MQTT disabled (communication travels strictly over LoRa).

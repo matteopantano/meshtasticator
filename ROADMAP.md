@@ -242,44 +242,71 @@ now tracked as Phase 5 deliverables / Phase 6 backlog.
 
 ---
 
-## Phase 5 - 🔲 TODO: Real Meshtastic Hardware Validation & ESP32 Firmware Verification
+## Phase 5 - ✅ PARTIALLY DONE: ESP32 Firmware Validation on Hardware
 
-**Goal**: Close the verification gap left by Phase 4 by running the complete
-pipeline on **physical Meshtastic radios** with the **ESP32 firmware doing
-the security work** (no Python bridge in the loop), then harden the tooling
-based on what is learned. Every step below states what is being proven and
-what log line / observable constitutes a pass, so the phase produces an
-auditable test record rather than "reported working".
+**Goal**: Close the verification gap left by Phase 4 by exercising the
+ESP32 firmware's own verification and command-publish path on hardware, then
+continue toward full physical-radio LoRa validation.
+
+**What is now verified**:
+
+- ESP32 firmware was built from the repo `.venv` toolchain on Windows and
+      flashed successfully to physical hardware.
+- ESP32 SoftAP + embedded `TinyMqtt` broker booted correctly on hardware.
+- The firmware-native signed-command path was exercised successfully by
+      publishing signed uplink envelopes to the ESP32 broker with the Python
+      bridge out of the loop.
+- Real Shelly actuation (`ON` / `OFF`) worked through the **firmware's own**
+      `processMeshCommand()` path.
+- No local `mqtt_bridge.py` process was active during the successful test,
+      so the working path was the ESP32 firmware path rather than the Python
+      gateway path.
+
+**Tooling/hardening completed during this phase**:
+
+- `meshtasticd-config/send_control_cmd.py` now supports `--serial`, so a
+      USB-attached TX node can be used without Wi-Fi.
+- `meshtasticd-config/provision_nodes.py` now reads `NODE_NAME_RX`,
+      `NODE_SHORT_RX`, `NODE_NAME_TX`, and `NODE_SHORT_TX` from `.env`.
+- New `meshtastic-web-gateway/` FastAPI project added for a USB/serial-linked
+      Meshtastic web control UI that reuses the existing signed command format.
+
+**Still not fully closed**:
+
+- Full physical **LoRa TX → RX → ACK back to TX** validation with the final
+      node mix remains follow-up work.
+- One discovered hardware constraint is now explicit: **nRF52-based TX nodes
+      (for example the RAK4630/RAK4631 family) do not provide Wi-Fi**, so TX-side
+      web access must use USB/serial or Bluetooth unless an ESP32-based node is
+      used instead.
 
 **Hardware needed**: 1x ESP32 dev board (hub), 1x ESP32-based Meshtastic node
 with Wi-Fi (RX gateway, e.g. Heltec V3 / T-Beam), 1x Meshtastic node (TX -
 any board, or a phone paired to one), 1x Shelly Gen 2+ (the Shelly 1 Gen4
 from Phase 4), a laptop with the repo `.venv` and `mosquitto-clients`.
 
-### 5.0 - Pre-flight (no radios yet)
+### 5.0 - Pre-flight (status)
 
-- [ ] `cp .env.example .env`; set a real `WIFI_PASS`, a fresh `CONTROL_SECRET`,
+- [x] `cp .env.example .env`; set a real `WIFI_PASS`, a fresh `CONTROL_SECRET`,
       `LORA_REGION` (the region you will use on the nodes, e.g. `EU_868`),
       and `GATEWAY_NODE_ID` (**after** step 5.2 reveals it - rebuild then).
-- [ ] `pio run` on **this Linux machine** (Phase 4 built only on Windows) →
-      confirm the `load_env.py` / `-std=gnu++17` / `-include utility`
-      workarounds hold; note the exact `TinyMqtt` commit resolved from Git
-      (pin it in `platformio.ini` if the build breaks).
-- [ ] Flash, open `pio device monitor`, expect the boot banner from docs/07 §3
+- [x] PlatformIO installed in `.venv`; firmware built and flashed successfully
+      from the repository environment on Windows.
+- [x] Flash, open `pio device monitor`, expect the boot banner from docs/07 §3
       **without** the `MESH_GATEWAY_NODE_ID is not configured` warning once
       5.2 is done.
-- [ ] Docker stack on the laptop stays **down** for this phase (or at least
-      `docker compose stop mqtt-broker`) so `localhost:1883` cannot be
-      confused with `192.168.4.1:1883`.
+- [x] Docker stack / local bridge ambiguity checked during validation; no
+      active `mqtt_bridge.py` process was present when the ESP32 firmware path
+      succeeded.
 
-### 5.1 - ESP32 firmware native security path (no radios, `mosquitto_pub`)
+### 5.1 - ESP32 firmware native security path (current status)
 
 Proves the code path Phase 4 never reached. Laptop joined to `ESP32-Hub`.
 
-- [ ] **Positive**: publish the uplink envelope from firmware README §7 with a
+- [x] **Positive**: publish the uplink envelope from firmware README §7 with a
       valid `sig` → serial shows `[Check 1/3 …]`, `[Check 2/3 …]`,
       `[Check 3/3 …]`, `[MQTT Publish] Topic: <target>/command/switch:0`.
-- [ ] **Shelly actuation from firmware**: with the real Shelly joined
+- [x] **Shelly actuation from firmware**: with the real Shelly joined
       (docs/07 §5, *Generic status update* ON) the relay clicks and serial
       shows `[MQTT State Event] Target: <target> | State: ON`.
 - [ ] **ACK downlink emitted**: serial shows
@@ -329,7 +356,8 @@ Proves the code path Phase 4 never reached. Laptop joined to `ESP32-Hub`.
       PSK) as RX so ACKs are decryptable.
 - [ ] Send a signed command from TX: either `send_control_cmd.py --mesh-host
       <tx-ip> --mesh-port 4403 --target <prefix> --action ON` (TX on home
-      Wi-Fi) or paste the JSON from docs/07 §6 in the app.
+      Wi-Fi), `send_control_cmd.py --serial <port> --target <prefix> --action ON`
+      for a no-Wi-Fi USB-attached TX, or paste the JSON from docs/07 §6 in the app.
 - [ ] Observe the full chain: TX radio → RX radio → RX MQTT uplink → ESP32
       `[Check 1..3]` → Shelly clicks → `[MQTT State Event]` → `[Mesh ACK]`
       → RX node transmits on `mqtt` channel → ACK visible on TX
@@ -346,6 +374,10 @@ Proves the code path Phase 4 never reached. Laptop joined to `ESP32-Hub`.
       re-joins and republishes retained status.
 - [ ] **Soak**: leave running ≥ 2 h sending a command every 10 min; record
       any ESP32 reset, `TinyMqtt` disconnects, or missed ACKs.
+
+**Current note**: during this phase the originally selected TX board was found
+to be non-Wi-Fi (`nRF52`-based), so lack of TX Wi-Fi is no longer treated as a
+networking bug; it is a hardware capability constraint.
 
 ### 5.4 - Record results
 
@@ -366,8 +398,9 @@ Implement only after 5.1-5.3 so fixes target observed problems:
       `--downlink-channel mqtt` (adds the channel + `downlink_enabled`), plus
       a `--verify` that re-reads `--info` and prints a PASS/FAIL checklist.
 - [ ] `meshtasticd-config/send_control_cmd.py`: make `seq` non-wrapping
-      (`int(time.time())`) - both gateways store `seq` as `long`/`int`; add
-      `--serial` so a USB-attached TX can be used without Wi-Fi
+      (`int(time.time())`) - both gateways store `seq` as `long`/`int`.
+- [x] `meshtasticd-config/send_control_cmd.py`: added `--serial` so a
+      USB-attached TX can be used without Wi-Fi
       (`meshtastic.serial_interface.SerialInterface`).
 - [ ] Topic-profile flag: `--shelly-profile gen1|gen2|both` in
       `mqtt_bridge.py` and `SHELLY_PROFILE` macro in the firmware (default

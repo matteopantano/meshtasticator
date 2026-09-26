@@ -14,6 +14,7 @@ import hashlib
 import argparse
 from pubsub import pub
 import meshtastic
+import meshtastic.serial_interface
 import meshtastic.tcp_interface
 
 try:
@@ -79,22 +80,55 @@ def extract_text_from_packet(packet) -> str:
 
 
 class MeshtasticSender:
-    def __init__(self, host: str = "localhost", port: int = 4405):
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 4405,
+        serial_port: str = None,
+        verbose: bool = True,
+    ):
         self.host = host
         self.port = port
+        self.serial_port = serial_port
+        self.verbose = verbose
         self.ack_received = False
         self.ack_data = None
         self.expected_seq = None
+        self.iface = None
 
-        print(f"{CYAN}Connecting to Meshtastic node at {self.host}:{self.port}...{RESET}")
+        if self.serial_port:
+            self._log(f"{CYAN}Connecting to Meshtastic node at serial port {self.serial_port}...{RESET}")
+        else:
+            self._log(f"{CYAN}Connecting to Meshtastic node at {self.host}:{self.port}...{RESET}")
         try:
-            self.iface = meshtastic.tcp_interface.TCPInterface(hostname=self.host, portNumber=self.port)
+            if self.serial_port:
+                self.iface = meshtastic.serial_interface.SerialInterface(devPath=self.serial_port)
+            else:
+                self.iface = meshtastic.tcp_interface.TCPInterface(hostname=self.host, portNumber=self.port)
             self.iface._waitConnected()
             pub.subscribe(self.on_receive, "meshtastic.receive")
-            print(f"{GREEN}✓ Connected & Synced with Meshtastic radio interface (Node: {self.iface.myInfo.my_node_num}).{RESET}")
+            self._log(f"{GREEN}✓ Connected & Synced with Meshtastic radio interface (Node: {self.iface.myInfo.my_node_num}).{RESET}")
         except Exception as e:
-            print(f"{RED}✗ Failed to connect to Meshtastic: {e}{RESET}")
-            sys.exit(1)
+            self.close()
+            raise RuntimeError(f"Failed to connect to Meshtastic: {e}") from e
+
+
+    def _log(self, message: str):
+        if self.verbose:
+            print(message)
+
+
+    def close(self):
+        try:
+            pub.unsubscribe(self.on_receive, "meshtastic.receive")
+        except Exception:
+            pass
+        if self.iface is not None:
+            try:
+                self.iface.close()
+            except Exception:
+                pass
+            self.iface = None
 
 
     def on_receive(self, packet, interface):
@@ -124,7 +158,13 @@ class MeshtasticSender:
         replay: bool = False,
         dest: str = "^all",
         timeout: int = 15,
+        verbose: bool = None,
     ):
+        if verbose is not None:
+            self.verbose = verbose
+
+        self.ack_received = False
+        self.ack_data = None
 
         # Determine sequence number
         if replay:
@@ -149,30 +189,39 @@ class MeshtasticSender:
         }
         payload_json = json.dumps(payload)
 
-        print(f"\n{BOLD}{'='*60}{RESET}")
-        print(f"{BOLD}  Meshtastic Secure Control Transmitter{RESET}")
-        print(f"{BOLD}{'='*60}{RESET}")
-        print(f"Target Device:  {BOLD}{target}{RESET}")
-        print(f"Action:         {BOLD}{action.upper()}{RESET}")
-        print(f"Sequence No:    {BOLD}{seq}{RESET} {'(FORCED REPLAY)' if replay else ''}")
-        print(f"HMAC Signature: {BOLD}{sig}{RESET} {'(INVALID / TAMPERED)' if bad_sig else '(Valid HMAC-SHA256)'}")
-        print(f"Payload JSON:   {CYAN}{payload_json}{RESET}\n")
+        self._log(f"\n{BOLD}{'='*60}{RESET}")
+        self._log(f"{BOLD}  Meshtastic Secure Control Transmitter{RESET}")
+        self._log(f"{BOLD}{'='*60}{RESET}")
+        self._log(f"Target Device:  {BOLD}{target}{RESET}")
+        self._log(f"Action:         {BOLD}{action.upper()}{RESET}")
+        self._log(f"Sequence No:    {BOLD}{seq}{RESET} {'(FORCED REPLAY)' if replay else ''}")
+        self._log(f"HMAC Signature: {BOLD}{sig}{RESET} {'(INVALID / TAMPERED)' if bad_sig else '(Valid HMAC-SHA256)'}")
+        self._log(f"Payload JSON:   {CYAN}{payload_json}{RESET}\n")
 
-        print(f"{YELLOW}📡 Transmitting Meshtastic packet to destination '{dest}'...{RESET}")
+        self._log(f"{YELLOW}📡 Transmitting Meshtastic packet to destination '{dest}'...{RESET}")
         pkt = self.iface.sendText(payload_json, destinationId=dest)
         pkt_id = getattr(pkt, "id", "broadcast")
-        print(f"{GREEN}✓ Packet transmitted over radio link (Packet ID: {pkt_id}).{RESET}")
+        self._log(f"{GREEN}✓ Packet transmitted over radio link (Packet ID: {pkt_id}).{RESET}")
 
+        result = {
+            "success": True,
+            "command": action.upper(),
+            "payload": payload,
+            "packet_id": pkt_id,
+            "status": "sent",
+            "ack": None,
+        }
 
         if bad_sig or replay:
-            print(f"\n{YELLOW}⏳ Observation mode for security test (Expecting Gateway to DROP packet)...{RESET}")
+            self._log(f"\n{YELLOW}⏳ Observation mode for security test (Expecting Gateway to DROP packet)...{RESET}")
             time.sleep(4)
-            print(f"{GREEN}🛡️ Security verification completed.{RESET}")
-            self.iface.close()
-            return
+            self._log(f"{GREEN}🛡️ Security verification completed.{RESET}")
+            result["status"] = "observation-complete"
+            self.close()
+            return result
 
         # Wait for ACK response
-        print(f"{CYAN}⏳ Awaiting status ACK from gateway (timeout: {timeout}s)...{RESET}")
+        self._log(f"{CYAN}⏳ Awaiting status ACK from gateway (timeout: {timeout}s)...{RESET}")
         start_time = time.time()
         while time.time() - start_time < timeout:
             if self.ack_received:
@@ -182,19 +231,23 @@ class MeshtasticSender:
                 status = self.ack_data.get("status")
 
                 badge = f"{GREEN}[🟢 ON]{RESET}" if state == "ON" else f"{RED}[🔴 OFF]{RESET}"
-                print(f"\n{GREEN}{'='*60}{RESET}")
-                print(f"{GREEN}🎉 Status ACK Received via Meshtastic!{RESET}")
-                print(f"Device:       {BOLD}{device}{RESET}")
-                print(f"Relay State:  {badge}")
-                print(f"ACK Seq:      {BOLD}{ack_seq}{RESET}")
-                print(f"Status:       {BOLD}{status}{RESET}")
-                print(f"{GREEN}{'='*60}{RESET}\n")
-                self.iface.close()
-                return
+                self._log(f"\n{GREEN}{'='*60}{RESET}")
+                self._log(f"{GREEN}🎉 Status ACK Received via Meshtastic!{RESET}")
+                self._log(f"Device:       {BOLD}{device}{RESET}")
+                self._log(f"Relay State:  {badge}")
+                self._log(f"ACK Seq:      {BOLD}{ack_seq}{RESET}")
+                self._log(f"Status:       {BOLD}{status}{RESET}")
+                self._log(f"{GREEN}{'='*60}{RESET}\n")
+                result["status"] = "ack"
+                result["ack"] = self.ack_data
+                self.close()
+                return result
             time.sleep(0.1)
 
-        print(f"\n{YELLOW}⚠️ Timed out waiting for Meshtastic ACK.{RESET}")
-        self.iface.close()
+        self._log(f"\n{YELLOW}⚠️ Timed out waiting for Meshtastic ACK.{RESET}")
+        result["status"] = "timeout"
+        self.close()
+        return result
 
 
 
@@ -207,17 +260,24 @@ if __name__ == "__main__":
     parser.add_argument("--bad-sig", action="store_true", help="Deliberately send an invalid HMAC signature")
     parser.add_argument("--replay", action="store_true", help="Deliberately send a replayed old sequence number")
     parser.add_argument("--dest", default="^all", help="Destination Node ID (default: ^all)")
+    parser.add_argument("--serial", help="Serial device path for a physical Meshtastic node (e.g. /dev/ttyACM0 or COM8)")
     parser.add_argument("--mesh-host", default="localhost", help="meshtasticd host (default: localhost)")
     parser.add_argument("--mesh-port", type=int, default=4404, help="meshtasticd port (default: 4404)")
     args = parser.parse_args()
 
-    sender = MeshtasticSender(host=args.mesh_host, port=args.mesh_port)
-    sender.send_command(
-        target=args.target,
-        action=args.action,
-        secret=args.secret,
-        seq=args.seq,
-        bad_sig=args.bad_sig,
-        replay=args.replay,
-        dest=args.dest
-    )
+    try:
+        sender = MeshtasticSender(host=args.mesh_host, port=args.mesh_port, serial_port=args.serial)
+        result = sender.send_command(
+            target=args.target,
+            action=args.action,
+            secret=args.secret,
+            seq=args.seq,
+            bad_sig=args.bad_sig,
+            replay=args.replay,
+            dest=args.dest
+        )
+        if not result.get("success", True):
+            sys.exit(1)
+    except Exception as exc:
+        print(f"{RED}✗ {exc}{RESET}")
+        sys.exit(1)

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAK4630 Remote Control</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="card hero">
+        <div>
+          <p class="eyebrow">REMOTE CONTROL</p>
+          <h1>RAK4630 Web Gateway</h1>
+          <p class="subtitle">Web UI → existing Meshtastic command implementation → RAK4630 → LoRa</p>
+        </div>
+        <div class="status-pill" id="connection-pill">
+          <span class="status-dot"></span>
+          <span id="connection-text">Checking connection…</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <h2>Commands</h2>
+          <button id="refresh-button" class="ghost-button" type="button">Refresh</button>
+        </div>
+        <div id="command-grid" class="command-grid"></div>
+      </section>
+
+      <section class="card details-grid">
+        <div>
+          <p class="detail-label">Last command</p>
+          <p class="detail-value" id="last-command">—</p>
+        </div>
+        <div>
+          <p class="detail-label">Last status</p>
+          <p class="detail-value" id="last-status">idle</p>
+        </div>
+        <div>
+          <p class="detail-label">Transport</p>
+          <p class="detail-value" id="transport-device">—</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Activity</h2>
+        <pre id="activity-log" class="activity-log">Waiting for commands…</pre>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -1,6 +1,6 @@
 # AGENTS.md - Antigravity Instructions for Meshtasticator
 
-This repository is **Meshtasticator**: a multi-node simulator, real-time web UI, and hardware deployment suite for Meshtastic LoRa mesh networks and IoT integrations (including Shelly Smart Relay MQTT control).
+This repository is **Meshtasticator**: a multi-node simulator, real-time web UI, hardware deployment suite, and serial/web control toolkit for Meshtastic LoRa mesh networks and IoT integrations (including Shelly Smart Relay MQTT control).
 
 ---
 
@@ -12,6 +12,7 @@ This repository is **Meshtasticator**: a multi-node simulator, real-time web UI,
 1. **Environment Variables**: All sensitive credentials (Wi-Fi passwords, private MQTT credentials, HMAC secrets) are loaded dynamically via `.env` (using `python-dotenv`).
 2. **Template File**: Only `.env.example` should be committed. Actual `.env`, `*.key`, `*.psk`, and `*.local.yaml` files are excluded by `.gitignore`.
 3. **Safe Defaults**: Example scripts use mock IDs (e.g. `shelly1-sim01`) and fallback development keys.
+4. **Shared Config Source**: The repository root `.env` is the shared source of truth for common settings (`CONTROL_SECRET`, `LORA_REGION`, node defaults). Subprojects such as `meshtastic-web-gateway/` may carry a local `.env` only for overrides like `MESHTASTIC_DEVICE` or `WEB_PORT`.
 
 ---
 
@@ -24,6 +25,7 @@ Meshtasticator/
 ├── .env.example                   # Environment configuration template
 ├── README.md                      # Main project entrypoint and quick reference
 ├── ROADMAP.md                     # Project status, verification notes, and roadmap
+├── meshtastic-web-gateway/        # FastAPI web UI for USB/serial-connected Meshtastic nodes
 │
 ├── docs/                          # Detailed architecture & feature documentation
 │   ├── 01_discrete_event_radio_simulator.md   # Python radio-layer discrete event simulator
@@ -42,7 +44,7 @@ Meshtasticator/
 │   ├── sim_rf_bridge.py           # Simulated RF cross-routing bridge between simulated nodes
 │   ├── mqtt_bridge.py             # Meshtastic-to-MQTT security gateway (HMAC + anti-replay + ACK)
 │   ├── provision_nodes.py         # 1-Click node provisioner (simulated containers or physical USB/Wi-Fi)
-│   ├── send_control_cmd.py        # Secure HMAC signed command transmitter client
+│   ├── send_control_cmd.py        # Secure HMAC signed command transmitter client (TCP or serial)
 │   ├── shelly_simulator.py        # Shelly relay emulator (Gen 1, Gen 2 RPC & Gen 2+ command/switch:0 topics)
 │   └── nginx.conf                 # meshtastic-web NGINX reverse-proxy
 │
@@ -97,6 +99,13 @@ python3 meshtasticd-config/mqtt_bridge.py --mesh-port 4404
 python3 meshtasticd-config/send_control_cmd.py --mesh-port 4406 --target shelly1-sim01 --action ON
 ```
 
+### Step 5: Serial Web Gateway (optional)
+```bash
+# Lightweight FastAPI UI for a USB/serial-connected Meshtastic node
+pip install -r meshtastic-web-gateway/requirements.txt
+uvicorn app.main:app --app-dir meshtastic-web-gateway --host 0.0.0.0 --port 8000
+```
+
 ---
 
 ## 4. Testing & Validation
@@ -104,7 +113,15 @@ python3 meshtasticd-config/send_control_cmd.py --mesh-port 4406 --target shelly1
 ```bash
 # Run unit tests
 python3 -m unittest discover tests -v
+
+# Run web gateway tests
+python3 -m pytest meshtastic-web-gateway/tests -q
 ```
+
+### Current hardware validation status
+- Phase 5 verified the **ESP32 firmware path on real hardware**: signed commands were accepted by the firmware and successfully actuated a real Shelly device without `mqtt_bridge.py` in the loop.
+- Full LoRa TX → RX → ACK-back validation with the final physical node mix remains follow-up work.
+- nRF52-based nodes such as the RAK4630/RAK4631 family should be treated as **non-Wi-Fi** boards for deployment planning.
 
 ---
 

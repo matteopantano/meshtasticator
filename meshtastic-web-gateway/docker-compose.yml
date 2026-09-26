@@ -1,0 +1,13 @@
+services:
+  web-gateway:
+    build:
+      context: ..
+      dockerfile: meshtastic-web-gateway/Dockerfile
+    env_file:
+      - ../.env
+      - .env
+    ports:
+      - "${WEB_PORT:-8000}:${WEB_PORT:-8000}"
+    devices:
+      - "${MESHTASTIC_DEVICE:-/dev/ttyACM0}:${MESHTASTIC_DEVICE:-/dev/ttyACM0}"
+    restart: unless-stopped

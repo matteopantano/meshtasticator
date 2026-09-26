@@ -14,7 +14,8 @@ A comprehensive simulation, testbed, and IoT-integration suite for
 | 5 | 🔗 **Multi-Node Docker Testbed & IoT/MQTT Pipeline** — two-node mesh + secure Meshtastic ➔ MQTT ➔ Shelly relay control | [Jump to §5](#-5-multi-node-testbed--iotmqtt-integration) | [docs/05_multi_node_iot_mqtt_pipeline.md](docs/05_multi_node_iot_mqtt_pipeline.md) |
 | 6 | 🔌 **Standalone ESP32 Gateway Firmware** — replaces the Python MQTT bridge on real hardware (SoftAP + embedded broker + native HMAC) | [Jump to §6](#-6-standalone-esp32-gateway-firmware) | [firmware/esp32-gateway/README.md](firmware/esp32-gateway/README.md) |
 | 7 | 🔧 **Physical Hardware Deployment** — deploy the whole pipeline on real Meshtastic nodes + ESP32 + Shelly, zero cloud/computer required | [Jump to §7](#-7-physical-hardware-deployment) | [docs/07_physical_hardware_deployment.md](docs/07_physical_hardware_deployment.md) |
-| 8 | 🧪 **Test Suite** — 69 unit tests covering the simulator core and the IoT security pipeline | [Jump to §8](#-8-tests--environment-setup) | [`tests/`](tests/) |
+| 8 | 📱 **RAK4630 / Serial Web Gateway** — FastAPI web UI that triggers the existing signed Meshtastic command flow through a USB/serial-connected node | [Jump to §8](#-8-rak4630--serial-web-gateway) | [meshtastic-web-gateway/README.md](meshtastic-web-gateway/README.md) |
+| 9 | 🧪 **Test Suite** — 69 core unit tests plus 10 web-gateway tests | [Jump to §9](#-9-tests--environment-setup) | [tests/](tests/), [meshtastic-web-gateway/tests/](meshtastic-web-gateway/tests/) |
 
 ---
 
@@ -216,9 +217,11 @@ pio run -t upload        # flash to an ESP32 over USB
 pio device monitor       # serial monitor at 115200 baud
 ```
 
-**Status**: build, SoftAP and embedded broker verified on hardware (Phase 4).
-The firmware's own HMAC/anti-replay/ACK code path is not yet verified
-end-to-end - see [ROADMAP.md](ROADMAP.md) Phase 5.
+**Status**: build, SoftAP, embedded broker, and the firmware-native signed
+command path have now been validated on hardware. During Phase 5 the ESP32
+firmware successfully processed signed commands and actuated a real Shelly
+without the Python bridge in the loop. Full physical LoRa TX → RX → ACK-back
+validation remains tracked in [ROADMAP.md](ROADMAP.md).
 
 - **Full wiring, config, flashing & real-Shelly connection guide**: see
   [firmware/esp32-gateway/README.md](firmware/esp32-gateway/README.md).
@@ -249,12 +252,42 @@ microcontroller.
 2. **Provision the TX node**: `python3 meshtasticd-config/provision_nodes.py --serial /dev/ttyUSB1 --role tx`
 3. **Connect the Shelly relay** (Gen 2+/Gen4): join it to `ESP32-Hub`, MQTT server `192.168.4.1:1883`, custom prefix = your `target`, and enable *"Generic status update over MQTT"*.
 
+> [!IMPORTANT]
+> TX-side Wi-Fi is only available on **ESP32-based** Meshtastic nodes. During
+> Phase 5 validation, an nRF52-based TX board was initially assumed to have
+> Wi-Fi and later confirmed not to; those boards must use USB/serial or
+> Bluetooth instead.
+
 - **Full bill of materials, wiring diagram, and step-by-step guide**: see
   [docs/07_physical_hardware_deployment.md](docs/07_physical_hardware_deployment.md).
 
 ---
 
-## 🧪 8. Tests & Environment Setup
+## 📱 8. RAK4630 / Serial Web Gateway
+
+The repository now includes [meshtastic-web-gateway](meshtastic-web-gateway),
+a lightweight FastAPI application for Linux VMs or small servers that control
+a USB/serial-connected Meshtastic node without introducing a new radio
+protocol.
+
+- Reuses the existing signed command implementation in [meshtasticd-config/send_control_cmd.py](meshtasticd-config/send_control_cmd.py)
+- Supports `MESHTASTIC_DEVICE` for a serial-connected node
+- Supports `MOCK_MESHTASTIC=true` for UI-only development
+- Uses the repository root [.env](.env) as the shared source of truth, with
+   optional local overrides in [meshtastic-web-gateway/.env.example](meshtastic-web-gateway/.env.example)
+
+Start it with:
+
+```bash
+uvicorn app.main:app --app-dir meshtastic-web-gateway --host 0.0.0.0 --port 8000
+```
+
+See [meshtastic-web-gateway/README.md](meshtastic-web-gateway/README.md) for
+deployment and Docker details.
+
+---
+
+## 🧪 9. Tests & Environment Setup
 
 ### Environment Setup
 ```bash
@@ -272,6 +305,12 @@ routing, node behavior) as well as the IoT security pipeline
 (`tests/test_mqtt_bridge.py`, `tests/test_shelly_simulator.py`) — the
 latter run with pure Python mocks, so no Docker/MQTT broker/hardware is
 required to validate the HMAC/anti-replay logic.
+
+The web gateway has an additional 10 tests:
+
+```bash
+python3 -m pytest meshtastic-web-gateway/tests -q
+```
 
 ---
 

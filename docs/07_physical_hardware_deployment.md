@@ -149,6 +149,10 @@ This automatically:
 >
 > # 3. Check the result
 > meshtastic --port /dev/ttyUSB0 --info | grep -A3 -i "mqtt\|channel"
+
+> # 4. Make sure the RX node actually forwards mesh traffic to MQTT:
+> meshtastic --port /dev/ttyUSB0 --set lora.ignoreMqtt false
+> meshtastic --port /dev/ttyUSB0 --set lora.configOkToMqtt true
 > ```
 >
 > Also note: `mqtt.address` carries only the host; a non-default port must be

@@ -255,6 +255,10 @@ that manually as described in
 or follow the full walkthrough in
 [`07_physical_hardware_deployment.md`](07_physical_hardware_deployment.md).
 
+If the RX node receives mesh packets but the ESP32 broker stays silent,
+also ensure the RX node has `lora.ignoreMqtt false` and
+`lora.configOkToMqtt true` before retesting.
+
 ---
 
 ## 4. Current Status & Verification Table

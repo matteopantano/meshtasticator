@@ -84,6 +84,11 @@ def provision_node(
             "--set", "mqtt.encryption_enabled", "false",
             "--set", "mqtt.root", "msh"
         ]
+        if role == "rx":
+            cmd_args += [
+                "--set", "lora.ignoreMqtt", "false",
+                "--set", "lora.configOkToMqtt", "true",
+            ]
     elif not is_sim:
         cmd_args += [
             "--set", "mqtt.enabled", "false"

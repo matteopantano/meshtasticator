@@ -158,6 +158,7 @@ class MeshtasticSender:
         replay: bool = False,
         dest: str = "^all",
         timeout: int = 15,
+        wait_ack: bool = True,
         verbose: bool = None,
     ):
         if verbose is not None:
@@ -220,6 +221,12 @@ class MeshtasticSender:
             self.close()
             return result
 
+        if not wait_ack:
+            self._log(f"{CYAN}ℹ️ --no-ack flag set, skipping ACK wait.{RESET}")
+            result["status"] = "sent-no-ack"
+            self.close()
+            return result
+
         # Wait for ACK response
         self._log(f"{CYAN}⏳ Awaiting status ACK from gateway (timeout: {timeout}s)...{RESET}")
         start_time = time.time()
@@ -260,13 +267,14 @@ if __name__ == "__main__":
     parser.add_argument("--bad-sig", action="store_true", help="Deliberately send an invalid HMAC signature")
     parser.add_argument("--replay", action="store_true", help="Deliberately send a replayed old sequence number")
     parser.add_argument("--dest", default="^all", help="Destination Node ID (default: ^all)")
-    parser.add_argument("--serial", help="Serial device path for a physical Meshtastic node (e.g. /dev/ttyACM0 or COM8)")
+    parser.add_argument("--serial-port", help="Serial device path for a physical Meshtastic node (e.g. /dev/ttyACM0 or COM8)")
     parser.add_argument("--mesh-host", default="localhost", help="meshtasticd host (default: localhost)")
     parser.add_argument("--mesh-port", type=int, default=4404, help="meshtasticd port (default: 4404)")
+    parser.add_argument("--no-ack", action="store_true", help="Skip waiting for ACK response")
     args = parser.parse_args()
 
     try:
-        sender = MeshtasticSender(host=args.mesh_host, port=args.mesh_port, serial_port=args.serial)
+        sender = MeshtasticSender(host=args.mesh_host, port=args.mesh_port, serial_port=args.serial_port)
         result = sender.send_command(
             target=args.target,
             action=args.action,
@@ -274,7 +282,8 @@ if __name__ == "__main__":
             seq=args.seq,
             bad_sig=args.bad_sig,
             replay=args.replay,
-            dest=args.dest
+            dest=args.dest,
+            wait_ack=not args.no_ack
         )
         if not result.get("success", True):
             sys.exit(1)

@@ -16,12 +16,12 @@ end-to-end physical deployment (Meshtastic nodes + ESP32 + Shelly).
 
 ## 1. What this firmware does
 
-1. **Networking (SoftAP mode)**: Configures the ESP32 as a Wi-Fi Access
-   Point (SSID `ESP32-Hub`, default IP `192.168.4.1`) and starts an
-   embedded MQTT 3.1.1 broker (`TinyMqtt`) on port `1883`. Both the physical
-   Meshtastic gateway node (its native `mqtt.*` client) and a Shelly smart
-   relay connect to this broker over Wi-Fi - no internet, no external
-   broker, no computer required at runtime.
+1. **Networking (Wi-Fi station mode)**: Joins the normal LAN using
+  `WIFI_SSID_RX` / `WIFI_PASS_RX`, obtains a DHCP address, prints that
+  address on the serial console, and starts an embedded MQTT 3.1.1 broker
+  (`TinyMqtt`) on port `1883`. The physical Meshtastic gateway node and
+  Shelly relay must join the same LAN and use this printed ESP32 address as
+  their MQTT broker.
 2. **Cryptographic validation (`mbedtls/md.h`)**: Implements HMAC-SHA256
    signature verification using the ESP32's native mbedTLS library, with
    the exact same signing vector as `compute_hmac_sig(secret, target,
@@ -112,8 +112,8 @@ When building with PlatformIO, configuration parameters are **automatically load
 
 | `.env` Key | C++ Macro | Default / Fallback | Purpose |
 | :--- | :--- | :--- | :--- |
-| `WIFI_SSID` | `AP_SSID` | `"ESP32-Hub"` | SoftAP Wi-Fi SSID |
-| `WIFI_PASS` | `AP_PASS` | `"YourSecureWifiPass123"` | SoftAP Wi-Fi Password |
+| `WIFI_SSID_RX` | `WIFI_SSID_RX` | empty | LAN Wi-Fi SSID used by the ESP32 and RX |
+| `WIFI_PASS_RX` | `WIFI_PASS_RX` | empty | LAN Wi-Fi password used by the ESP32 and RX |
 | `CONTROL_SECRET` | `CONTROL_SECRET` | `"MeshShellySecret2026"` | Shared HMAC-SHA256 Secret |
 | `LORA_REGION` | `MESH_LORA_REGION` | `"US"` (`.env.example` ships `EU_868`) | Meshtastic LoRa Region - **must equal the region string in the node's MQTT topics** (`msh/EU_868/...`), since the firmware builds the downlink ACK topic from it |
 | `GATEWAY_NODE_ID` | `MESH_GATEWAY_NODE_ID` | `0x00000000` | Decimal/Hex Node ID of the physical RX gateway node (`from` of downlink ACKs) |
@@ -134,15 +134,16 @@ When building with PlatformIO, configuration parameters are **automatically load
 ## 5. Connecting the Meshtastic Gateway Node
 
 Configure the physical Meshtastic node that will bridge mesh traffic to
-this ESP32 to join its SoftAP and use its native MQTT client:
+this ESP32 to join the same LAN and use the IP printed by the ESP32 serial
+monitor as its native MQTT broker address:
 
 ```bash
 meshtastic --set network.wifi_enabled true \
-           --set network.wifi_ssid "ESP32-Hub" \
-           --set network.wifi_psk "YourSecureWifiPass123"
+           --set network.wifi_ssid "<WIFI_SSID_RX>" \
+           --set network.wifi_psk "<WIFI_PASS_RX>"
 
 meshtastic --set mqtt.enabled true \
-           --set mqtt.address "192.168.4.1" \
+           --set mqtt.address "<ESP32_LAN_IP>" \
            --set mqtt.json_enabled true \
            --set mqtt.encryption_enabled false \
            --set mqtt.root "msh"
